@@ -175,6 +175,7 @@ public:
     static CodeOp getGroundTermCheck(const Term* trm);
 
     bool equalsForOpMatching(const CodeOp& o) const;
+    bool allowsSkippingAlternative(const CodeOp& o) const;
 
     /**
      * Return true iff CodeOp contains a success instruction
@@ -207,6 +208,9 @@ public:
     inline CodeOp* alternative() const { return _alternative; }
     inline CodeOp*& alternative() { return _alternative; }
 
+    inline bool isPopAlternative() const { return _instruction()==CHECK_FUN && _popAlternative(); }
+    inline void setPopAlternative(bool v) { _setPopAlternative(v); }
+
     inline void setAlternative(CodeOp* op) { ASS_NEQ(op, this); _alternative=op; }
 
     void makeFail() { static_assert(SUCCESS_OR_FAIL==0); _content = 0; }
@@ -214,10 +218,11 @@ public:
     friend std::ostream& operator<<(std::ostream& out, const CodeOp& op);
 
     BITFIELD(64,
-      BITFIELD_MEMBER(unsigned, _arg, _setArg, CHAR_BIT * sizeof(unsigned) - INSTRUCTION_BITS,
+      BITFIELD_MEMBER(unsigned, _arg, _setArg, CHAR_BIT * sizeof(unsigned) - INSTRUCTION_BITS - 1,
+      BITFIELD_MEMBER(bool, _popAlternative, _setPopAlternative, 1,
       BITFIELD_MEMBER(unsigned, _instruction, _setInstruction, INSTRUCTION_BITS,
       END_BITFIELD
-    )))
+    ))))
     static_assert(sizeof(void *) <= sizeof(uint64_t), "must be able to fit a pointer into a 64-bit integer");
     template<class T>
     BITFIELD_PTR_GET(T, _data, INSTRUCTION_BITS)

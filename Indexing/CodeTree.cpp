@@ -347,6 +347,14 @@ bool CodeTree::CodeOp::equalsForOpMatching(const CodeOp& o) const
   }
 }
 
+bool CodeTree::CodeOp::allowsSkippingAlternative(const CodeOp& o) const
+{
+  if (_instruction() != CHECK_FUN) {
+    return false;
+  }
+  return _instruction() == o._instruction() && _arg() == o._arg();
+}
+
 const CodeTree::SearchStruct* CodeTree::CodeOp::getSearchStruct() const
 {
   ASS(isSearchStruct());
@@ -818,9 +826,10 @@ void CodeTree::incorporate(CodeStack& code)
   CodeOp** tailTarget;
   size_t matchedCnt;
   ILStruct* lastMatchedILS=0;
+  CodeOp* treeOp = getEntryPoint();
+  CodeOp* lastBranch = getEntryPoint();
 
   {
-    CodeOp* treeOp = getEntryPoint();
 
     for (size_t i = 0; i < clen; i++) {
       CodeOp* chainStart = treeOp;
@@ -905,6 +914,7 @@ void CodeTree::incorporate(CodeStack& code)
     matchedCnt = clen - 1;
 
     //we need to find where to put it
+    lastBranch = treeOp;
     while (treeOp->alternative()) {
       treeOp = treeOp->alternative();
     }
@@ -917,6 +927,15 @@ matching_done:
 
   CodeBlock* rem=buildBlock(code, clen-matchedCnt, lastMatchedILS);
   *tailTarget=&(*rem)[0];
+  CodeOp *tailOp = *tailTarget;
+  if (treeOp->allowsSkippingAlternative(*tailOp)) {
+    treeOp->setPopAlternative(true);
+  } else if (!tailOp->isCheckFun()) {
+    while (lastBranch->alternative() && lastBranch != treeOp) {
+      lastBranch->setPopAlternative(false);
+      lastBranch = lastBranch->alternative(); 
+    }
+  }
   LOG_OP(rem->toString()<<" incorporated, mismatch caused by "<<code[matchedCnt].toString());
 
   //truncate the part that was used and thus does not need disposing
@@ -1489,6 +1508,9 @@ inline bool CodeTree::Matcher::doCheckFun()
   }
   fte.expand();
   tp+=FlatTerm::FUNCTION_ENTRY_COUNT;
+  if (op->isPopAlternative()) {
+    btStack.pop();
+  }
   return true;
 }
 
