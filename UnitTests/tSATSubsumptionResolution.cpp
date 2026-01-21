@@ -11,9 +11,11 @@
 #include "Test/SyntaxSugar.hpp"
 
 #include "SATSubsumption/SATSubsumptionAndResolution.hpp"
+#include "Indexing/ClauseCodeTree.hpp"
 
 using namespace std;
 using namespace SATSubsumption;
+using namespace Indexing;
 using namespace Test;
 
 #define SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION  \
@@ -465,4 +467,44 @@ TEST_FUN(PaperExample)
   }
 
   ASS(success)
+}
+
+TEST_FUN(AlternativeOptimizationDeletePops)
+{
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION)
+  // C1 = ~p(i(i(i(a,i(b,c)),c),i(b,a)))
+  // C2 = ~p(b)
+  // C3 = ~p(c)
+  // C4 = ~p(X2)
+  Kernel::Clause *C1 = clause({ ~p(f2(d,d)) });
+  Kernel::Clause *C2 = clause({ ~p(d) });
+  Kernel::Clause *C3 = clause({ ~p(e) });
+  Kernel::Clause *C4 = clause({ ~p(x2) });
+  // ~p(i(X0,X1))
+  Kernel::Clause *D = clause({ ~p(f2(e,e)) });
+  ClauseCodeTree ctree;
+  ctree.insert(C1);
+  ctree.insert(C2);
+  ctree.insert(C3);
+  ctree.insert(C4);
+  ClauseCodeTree::ClauseMatcher cm;
+  int resolvedQueryLit;
+  cm.init(&ctree, D, true);
+  cm.next(resolvedQueryLit);
+  ASS_EQ(cm.matched(), true);
+
+  C1 = clause({ p2(c,d), p2(d,c)});
+  C2 = clause({ p2(c,d), p2(c,c)});
+  C3 = clause({ p2(c,d), p2(x,c)});
+  D = clause({ p2(c,d) , p2(e,c) });
+  ClauseCodeTree ctree2;
+  ctree2.insert(C1);
+  ctree2.insert(C2);
+  ctree2.insert(C3);
+  ClauseCodeTree::ClauseMatcher cm2;
+  int resolvedQueryLit2;
+  cm2.init(&ctree2, D, false);
+  cm2.next(resolvedQueryLit2);
+  ASS_EQ(cm2.matched(), true);
+
 }

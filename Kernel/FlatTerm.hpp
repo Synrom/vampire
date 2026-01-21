@@ -41,6 +41,8 @@ public:
 
   static constexpr size_t FUNCTION_ENTRY_COUNT=3;
 
+  friend std::ostream& operator<< (std::ostream& os, const FlatTerm& );
+
   enum EntryTag {
     FUN_TERM_PTR = 0,
     FUN = 1,
@@ -82,6 +84,7 @@ public:
     BITFIELD_PTR_GET(Term, _term, 0)
     BITFIELD_PTR_SET(Term, _setTerm, 0)
     static_assert(sizeof(void *) <= sizeof(uint64_t), "must be able to fit a pointer into a 64-bit integer");
+    friend std::ostream& operator<< (std::ostream& os, const Entry& );
   };
 
   inline Entry& operator[](size_t i) { ASS_L(i,_length); return _data[i]; }

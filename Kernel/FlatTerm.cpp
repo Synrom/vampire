@@ -199,6 +199,42 @@ FlatTerm* FlatTerm::copy(const FlatTerm* ft)
   return res;
 }
 
+std::ostream& operator<< (std::ostream& os, const FlatTerm::Entry& e) {
+  switch (e._tag()) {
+    case FlatTerm::FUN_TERM_PTR:
+      os << "FUN_TERM_PTR: ";
+      if (e._term()->isLiteral() && static_cast<Literal*>(e._term())->isNegative()) {
+        os << "~";
+      }
+      os << *e._term();
+      break;
+    case FlatTerm::FUN:
+      os << "FUN";
+      break;
+    case FlatTerm::VAR:
+      os << "VAR: X" << e._number();
+      break;
+    case FlatTerm::FUN_RIGHT_OFS:
+      os << "FUN_RIGHT_OFS: " << e._number();
+      break;
+    case FlatTerm::FUN_UNEXPANDED:
+      os << "FUN_UNEXPANDED";
+      break;
+    default:
+      os << "UNKNOWN (" << e._tag() << ")";
+  }
+  return os;
+}
+
+std::ostream& operator<< (std::ostream& os, const FlatTerm& term) {
+  for (unsigned int i = 0; i < term._length; i++) {
+    FlatTerm::Entry e = term[i];
+    os << e;
+    if (i < term._length - 1) os << " | ";
+  }
+  return os;
+}
+
 void FlatTerm::swapCommutativePredicateArguments()
 {
   ASS_EQ((*this)[0]._tag(), FUN);

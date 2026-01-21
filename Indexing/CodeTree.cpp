@@ -334,9 +334,10 @@ bool CodeTree::CodeOp::equalsForOpMatching(const CodeOp& o) const
   switch(_instruction()) {
   case LIT_END:
     return getILS()->equalsForOpMatching(*o.getILS());
+  case CHECK_FUN:
+    return _arg() == o._arg();
   case SUCCESS_OR_FAIL:
   case CHECK_GROUND_TERM:
-  case CHECK_FUN:
   case ASSIGN_VAR:
   case CHECK_VAR:
     return _content==o._content;
@@ -349,10 +350,7 @@ bool CodeTree::CodeOp::equalsForOpMatching(const CodeOp& o) const
 
 bool CodeTree::CodeOp::allowsSkippingAlternative(const CodeOp& o) const
 {
-  if (_instruction() != CHECK_FUN) {
-    return false;
-  }
-  return _instruction() == o._instruction() && _arg() == o._arg();
+  return _instruction() == CHECK_FUN && _instruction() == o._instruction();
 }
 
 const CodeTree::SearchStruct* CodeTree::CodeOp::getSearchStruct() const
@@ -372,7 +370,9 @@ std::ostream& operator<<(std::ostream& out, const CodeTree::CodeOp& op)
   switch (op._instruction()) {
     case CodeTree::SUCCESS_OR_FAIL:
       if (op.isSuccess()) {
-        out << "success";
+        out << "success ";
+        Clause* clause = op._data<Clause>();
+        out << *clause;
       } else {
         out << "fail";
       }
@@ -385,6 +385,9 @@ std::ostream& operator<<(std::ostream& out, const CodeTree::CodeOp& op)
       break;
     case CodeTree::CHECK_FUN:
       out << "check fun " << env.signature->getFunction(op._arg())->name();
+      if (op.isPopAlternative()) {
+        out << " (pops alternative)";
+      }
       break;
     case CodeTree::ASSIGN_VAR:
       out << "assign var X" << op._arg();
@@ -828,6 +831,7 @@ void CodeTree::incorporate(CodeStack& code)
   ILStruct* lastMatchedILS=0;
   CodeOp* treeOp = getEntryPoint();
   CodeOp* lastBranch = getEntryPoint();
+  bool lastMoveWasAlternative = false;
 
   {
 
@@ -838,6 +842,7 @@ void CodeTree::incorporate(CodeStack& code)
       for (;;) {
         if (treeOp->isSearchStruct()) {
           //handle the SEARCH_STRUCT
+          lastMoveWasAlternative = false;
           SearchStruct* ss = treeOp->getSearchStruct();
           CodeOp** toPtr;
           if (ss->getTargetOpPtr<true>(code[i], toPtr)) {
@@ -855,10 +860,17 @@ void CodeTree::incorporate(CodeStack& code)
         }
 
         if (treeOp->alternative()) {
+          if (lastMoveWasAlternative == false) {
+            lastBranch = treeOp;
+            lastMoveWasAlternative = true;
+          }
           //try alternative if there is some
           treeOp = treeOp->alternative();
         } else {
           //matching failed, we'll add the new branch here
+          if (lastMoveWasAlternative == false) {
+            lastBranch = treeOp;
+          }
           tailTarget = &treeOp->alternative();
           matchedCnt = i;
           goto matching_done;
@@ -872,6 +884,7 @@ void CodeTree::incorporate(CodeStack& code)
             //we put CHECK_FUN ops into the SEARCH_STRUCT op, and
             //restart with the chain
             compressCheckOps<SearchStruct::FN_STRUCT>(chainStart);
+            lastMoveWasAlternative = false;
             treeOp = chainStart;
             checkFunOps = 0;
             checkGroundTermOps = 0;
@@ -887,6 +900,7 @@ void CodeTree::incorporate(CodeStack& code)
             //we put CHECK_GROUND_TERM ops into the SEARCH_STRUCT op, and
             //restart with the chain
             compressCheckOps<SearchStruct::GROUND_TERM_STRUCT>(chainStart);
+            lastMoveWasAlternative = false;
             treeOp = chainStart;
             checkFunOps = 0;
             checkGroundTermOps = 0;
@@ -906,6 +920,7 @@ void CodeTree::incorporate(CodeStack& code)
       //either (as each code block contains at least one FAIL or SUCCESS
       //operation, and CodeStack contains at most one SUCCESS as the last
       //operation)
+      lastMoveWasAlternative = false;
       treeOp++;
     }
     //We matched the whole CodeStack. If we are here, we are inserting an
@@ -914,7 +929,9 @@ void CodeTree::incorporate(CodeStack& code)
     matchedCnt = clen - 1;
 
     //we need to find where to put it
-    lastBranch = treeOp;
+    if (lastMoveWasAlternative == false) {
+      lastBranch = treeOp;
+    }
     while (treeOp->alternative()) {
       treeOp = treeOp->alternative();
     }
@@ -1508,7 +1525,7 @@ inline bool CodeTree::Matcher::doCheckFun()
   }
   fte.expand();
   tp+=FlatTerm::FUNCTION_ENTRY_COUNT;
-  if (op->isPopAlternative()) {
+  if (op->alternative() && op->isPopAlternative()) {
     btStack.pop();
   }
   return true;
