@@ -202,14 +202,6 @@ struct CodeTree::ILStruct::GVArrComparator
   }
 };
 
-void CodeTree::ILStruct::addNextBin(unsigned nextBinIdx) {
-  if (nextBinSize >= nextBins.size()) {
-    size_t newSize = nextBinSize ? nextBinSize * 2 : 8;
-    nextBins.expand(newSize);
-  }
-  nextBins[nextBinSize++] = nextBinIdx;
-}
-
 /**
  * This function is called by the buildBlock function to make the
  * ILStruct object relate to its predecessors
@@ -423,13 +415,7 @@ void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litSt
       break;
     case CodeTree::LIT_END:
       ils = op.getILS();
-      out << GREEN << "lit end " << CRESET << "(nextCnt=" << ils->nextCnt << ", hasSuccessor=" << ils->hasSuccessor << ")";
-      out << " bins=[";
-      for (unsigned i=0; i < ils->nextBinSize; i++)  {
-        out << ils->nextBins[i];
-        if (i != ils->nextBinSize - 1) out << ", ";
-      }
-      out << "]";
+      out << GREEN << "lit end " << CRESET << "(nextBinCnt=" << ils->nextBinCnt << ", hasSuccessor=" << ils->hasSuccessor << ") binIdx=" << ils->nextBinIdx;
       break;
     case CodeTree::CHECK_GROUND_TERM:
       out << YELLOW << "ground " << CRESET << *op.getTargetTerm();
@@ -587,7 +573,7 @@ bool CodeTree::Matcher<removing, checkRange, higherOrder>::execute()
 
   bool shouldBacktrack=false;
   for(;;) {
-    if(op->alternative()) {
+    if(op->alternative() && !op->isNext()) {
       if constexpr (removing) {
         btStack.push(BTPointRemoving(tp, op->alternative(), RemovingBase::firstsInBlocks->size()));
       } else {
@@ -619,6 +605,10 @@ bool CodeTree::Matcher<removing, checkRange, higherOrder>::execute()
             shouldBacktrack=true;
           }
         }
+        break;
+      case NEXT:
+        doNextOp();
+        shouldBacktrack=false;
         break;
       case LIT_END:
         if constexpr (removing) {
@@ -668,13 +658,21 @@ bool CodeTree::Matcher<removing, checkRange, higherOrder>::execute()
 }
 
 template<bool removing, bool checkRange, bool higherOrder>
-void CodeTree::Matcher<removing, checkRange, higherOrder>::init(CodeTree* tree_, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, Stack<CodeOp*>* firstsInBlocks_)
+void CodeTree::Matcher<removing, checkRange, higherOrder>::init(CodeTree* tree_, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, Stack<CodeOp*>* firstsInBlocks_, bool reachedByNext_, Stack<CheckPoint>&& checkpoints_, unsigned nrNextBins)
 {
   tree=tree_;
   entry=entry_;
 
   linfos=linfos_;
   linfoCnt=linfoCnt_;
+
+  reachedByNext = reachedByNext_;
+  checkpoints = checkpoints_;
+  nextBins.ensure(nrNextBins);
+  for (Stack<CheckPoint>& bin: nextBins) {
+    bin.reset();
+  }
+  executingNormally = false;
 
   if constexpr (removing) {
     RemovingBase::firstsInBlocks=firstsInBlocks_;
@@ -687,6 +685,7 @@ void CodeTree::Matcher<removing, checkRange, higherOrder>::init(CodeTree* tree_,
   curLInfo=0;
 
   bindings.ensure(tree->_maxVarCnt);
+  boundedSize = 0;
   btStack.reset();
 }
 
@@ -717,6 +716,34 @@ bool CodeTree::Matcher<removing, checkRange, higherOrder>::backtrack()
 template<bool removing, bool checkRange, bool higherOrder>
 bool CodeTree::Matcher<removing, checkRange, higherOrder>::prepareLiteral()
 {
+  if (reachedByNext && !executingNormally) {
+    while (!checkpoints.isEmpty() && checkpoints.top().liIndex >= linfoCnt) {
+      checkpoints.pop();
+    }
+    if (checkpoints.isEmpty()) {
+      if (!entry) {
+        return false;
+      } else {
+        executingNormally = true;
+        curLInfo = 0;
+      }
+    } else {
+      CheckPoint checkpoint = checkpoints.pop();
+      ASS(bindings.size() >= checkpoint.bindings.size());
+      for (unsigned i=0; i < checkpoint.bindings.size(); i++) {
+        bindings[i] = checkpoint.bindings[i];
+      }
+      curLInfo = checkpoint.liIndex; 
+      ft = linfos[curLInfo].ft;
+      auto bp = checkpoint.btPoint;
+      tp=bp.tp;
+      op=bp.op;
+      if constexpr (removing) {
+        RemovingBase::firstsInBlocks->truncate(bp.fibDepth);
+        RemovingBase::firstsInBlocks->push(op);
+      }
+    }
+  }
   if constexpr (removing) {
     RemovingBase::firstsInBlocks->truncate(RemovingBase::initFIBDepth);
   }
@@ -743,6 +770,7 @@ inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doAssignVar()
       }
     }
     bindings[var]=TermList::var(fte->_number());
+    boundedSize = var+1;
     tp++;
   }
   else {
@@ -763,6 +791,7 @@ inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doAssignVar()
       }
     }
     bindings[var]=TermList(fte->_term());
+    boundedSize = var+1;
     fte++;
     ASS_EQ(fte->_tag(), FlatTerm::FUN_RIGHT_OFS);
     tp+=fte->_number();
@@ -800,6 +829,31 @@ inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doCheckVar()
     tp+=fte->_number();
   }
   return true;
+}
+
+template<bool removing, bool checkRange, bool higherOrder>
+inline void CodeTree::Matcher<removing, checkRange, higherOrder>::doNextOp()
+{
+  unsigned bin = op->_arg();
+  ASS(bin < nextBins.size());
+
+  BindingArray clonedBinding(boundedSize);
+  for (unsigned i=0;i < boundedSize; i++) {
+    clonedBinding[i] = bindings[i];
+  }
+  if constexpr (removing) {
+    nextBins[bin].push(CheckPoint{
+      curLInfo,
+      std::move(clonedBinding),
+      BTPointRemoving {tp, op->alternative(), RemovingBase::firstsInBlocks->size()} 
+    });
+  } else {
+    nextBins[bin].push(CheckPoint{
+      curLInfo,
+      std::move(clonedBinding),
+      BTPoint {tp, op->alternative()} 
+    });
+  }
 }
 
 template<bool removing, bool checkRange, bool higherOrder>

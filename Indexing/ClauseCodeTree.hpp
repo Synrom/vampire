@@ -60,6 +60,7 @@ protected:
   : public Matcher</*removing*/true,false,higherOrder>
   {
     using Base = Matcher</*removing*/true,false,higherOrder>;
+    using CheckPoint = typename Base::CheckPoint;
 
     void init(CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_,
 	ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_);
@@ -80,8 +81,9 @@ protected:
     using Base::_matched;
     using Base::finished;
     using Base::execute;
+    using CheckPoint = typename Base::CheckPoint;
 
-    void init(CodeTree* tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess=false);
+    void init(CodeTree* tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess, bool reachedByNext_, Stack<CheckPoint>&& checkpoints_, unsigned nrNextBins);
     bool next();
     bool doEagerMatching();
 
@@ -102,6 +104,8 @@ protected:
 public:
   struct ClauseMatcher
   {
+    using CheckPoint = typename LiteralMatcher::CheckPoint;
+
     void init(ClauseCodeTree* tree_, Clause* query_, bool sres_);
     void reset();
     bool keepRecycled() const { return lInfos.keepRecycled(); }
@@ -217,7 +221,7 @@ private:
       CodeOp** reference; // reference pointing to this block
       ILStruct* ils;
 
-      CodeOp** addNextOp(unsigned sharedPrefix, OptimizedClauseCodeTree& tree, bool matchedFull);
+      CodeOp* addNextOp(unsigned sharedPrefix, Incorporator& incorporator, bool matchedFull);
       void appendBlock(CodeBlock* nextBlock);
       CodeOp** findInsertionReference();
     };
@@ -231,7 +235,8 @@ private:
     void optimizeIntraClausalLiteralOrder();
     unsigned evalSharingBetweenLits(const CodeStack &l1code, const CodeStack &l2code);
     MatchedBlock evalSharing(unsigned litIndex, const Stack<EvalSharingEntry>& startOps, Stack<EvalSharingEntry>& nextEntries);
-    CodeOp* buildBlock(unsigned litIndex, unsigned matchedCnt, ILStruct* prev, bool stop, bool addedNextOp);
+    CodeOp* buildBlock(unsigned litIndex, unsigned matchedCnt, ILStruct* prev, bool stop, CodeOp* addedNextOp);
+    void setNextOPArg(CodeOp* nextOp, ILStruct* ils);
     void destroy();
 
     MatchedBlock fullyMatchedBlock, partiallyMatchedBlock;
@@ -246,7 +251,7 @@ private:
   };
 
   friend Incorporator;
-  unsigned nextCnt = 0;
+  unsigned nextBinCnt = 0;
 };
 
 

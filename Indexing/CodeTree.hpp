@@ -118,11 +118,9 @@ public:
     ILStruct* previous;
 
     unsigned varCnt;
-    unsigned nextCnt=0;
+    unsigned nextBinCnt=0;
     bool hasSuccessor;
-    DArray<unsigned> nextBins;
-    unsigned nextBinSize=0;
-    void addNextBin(unsigned nextBinIdx);
+    int nextBinIdx=-1;
 
     unsigned* globalVarNumbers;
 
@@ -368,6 +366,13 @@ public:
       size_t fibDepth;
     };
 
+    struct CheckPoint
+    {
+      size_t liIndex;
+      BindingArray bindings;
+      std::conditional_t<removing,BTPointRemoving,BTPoint> btPoint;
+    };   
+
     inline bool finished() const { return !fresh && !_matched; }
     inline bool matched() const { return _matched && op->isLitEnd(); }
     inline bool success() const { return _matched && op->isSuccess(); }
@@ -384,6 +389,12 @@ public:
 
     BindingArray bindings;
 
+    DArray<Stack<CheckPoint>> nextBins;
+    Stack<CheckPoint> checkpoints;
+    bool reachedByNext = false;
+    bool executingNormally = false;
+    unsigned boundedSize=0;
+
     bool keepRecycled() const
     {
       if constexpr (removing) {
@@ -396,13 +407,14 @@ public:
 
   protected:
     void init(CodeTree* tree_, CodeOp* entry_, LitInfo* linfos_ = 0,
-      size_t linfoCnt_ = 0, Stack<CodeOp*>* firstsInBlocks_ = 0);
+      size_t linfoCnt_= 0 , Stack<CodeOp*>* firstsInBlocks_ = 0, bool reachedByNext_=false, Stack<CheckPoint>&& checkpoints_=Stack<CheckPoint>(), unsigned nrNextBins=0);
 
     bool backtrack();
     bool prepareLiteral();
     bool doAssignVar();
     bool doCheckVar();
     bool doCheckFun();
+    void doNextOp();
     bool doCheckGroundTerm();
     bool doSearchStruct();
 
