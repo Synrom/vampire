@@ -2,6 +2,11 @@
 /cmake-build
 /build
 /coverage-build
+/build-profile
+/build-vscode
+/obj
+/output
+/profiles
 
 # ignore TPTP directories/symlinks at the top level
 /Problems

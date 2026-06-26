@@ -118,6 +118,11 @@ public:
     ILStruct* previous;
 
     unsigned varCnt;
+    unsigned nextCnt=0;
+    bool hasSuccessor;
+    DArray<unsigned> nextBins;
+    unsigned nextBinSize=0;
+    void addNextBin(unsigned nextBinIdx);
 
     unsigned* globalVarNumbers;
 
@@ -154,6 +159,7 @@ public:
     ASSIGN_VAR = 4,
     CHECK_VAR = 5,
     SEARCH_STRUCT = 6,
+    NEXT = 7,
   };
   static const unsigned INSTRUCTION_BITS = 3;
   static_assert(SEARCH_STRUCT < 1 << INSTRUCTION_BITS, "Instruction should fit within INSTRUCTION_BITS");
@@ -173,6 +179,7 @@ public:
     static CodeOp getLitEnd(ILStruct* ils);
     static CodeOp getTermOp(Instruction i, unsigned num);
     static CodeOp getGroundTermCheck(const Term* trm);
+    static CodeOp getNext(unsigned num);
 
     bool equalsForOpMatching(const CodeOp& o) const;
 
@@ -189,6 +196,12 @@ public:
     inline bool isSearchStruct() const { return _instruction()==SEARCH_STRUCT; }
     inline bool isCheckFun() const { return _instruction()==CHECK_FUN; }
     inline bool isCheckGroundTerm() const { return _instruction()==CHECK_GROUND_TERM; }
+    inline bool isNext() const { return _instruction()==NEXT; }
+    inline bool hasSuccessor() const {
+      if (_instruction() == SUCCESS_OR_FAIL) return false;
+      if (isLitEnd()) return getILS()->hasSuccessor;
+      return true;
+    }
 
     inline Term* getTargetTerm() const
     {
@@ -441,7 +454,8 @@ public:
   //////// auxiliary methods //////////
 
   inline bool isEmpty() const { return !_entryPoint; }
-  inline CodeOp* getEntryPoint() const { ASS(!isEmpty()); return &(*_entryPoint)[0]; }
+  inline CodeOp* getEntryPoint() const { ASS(!isEmpty()); return _entryPoint; }
+  inline CodeBlock* getEntryBlock() const { ASS(!isEmpty()); return firstOpToCodeBlock(_entryPoint); }
   static CodeBlock* firstOpToCodeBlock(CodeOp* op);
 
   template<class Visitor>
@@ -498,7 +512,7 @@ public:
   /** maximal number of local variables in a stored term/literal (always at least 1) */
   unsigned _maxVarCnt = 1;
 
-  CodeBlock* _entryPoint = nullptr;
+  CodeOp* _entryPoint = nullptr;
 };
 
 }

@@ -202,6 +202,14 @@ struct CodeTree::ILStruct::GVArrComparator
   }
 };
 
+void CodeTree::ILStruct::addNextBin(unsigned nextBinIdx) {
+  if (nextBinSize >= nextBins.size()) {
+    size_t newSize = nextBinSize ? nextBinSize * 2 : 8;
+    nextBins.expand(newSize);
+  }
+  nextBins[nextBinSize++] = nextBinIdx;
+}
+
 /**
  * This function is called by the buildBlock function to make the
  * ILStruct object relate to its predecessors
@@ -336,6 +344,15 @@ CodeTree::CodeOp CodeTree::CodeOp::getGroundTermCheck(const Term* trm)
   return res;
 }
 
+CodeTree::CodeOp CodeTree::CodeOp::getNext(unsigned num)
+{
+  CodeOp res;
+  res._setInstruction(NEXT);
+  res._setArg(num);
+  ASS(res.isNext());
+  return res;
+}
+
 /**
  * Return true iff @b o is equal to the object for the purpose
  * of operation matching during cide insertion into the tree
@@ -348,6 +365,8 @@ bool CodeTree::CodeOp::equalsForOpMatching(const CodeOp& o) const
   switch(_instruction()) {
   case LIT_END:
     return getILS()->equalsForOpMatching(*o.getILS());
+  case NEXT:
+    return false;
   case SUCCESS_OR_FAIL:
   case CHECK_GROUND_TERM:
   case CHECK_FUN:
@@ -392,6 +411,7 @@ std::string functorStr(unsigned functor, bool litStart)
 
 void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litStart) const
 {
+  const ILStruct* ils;
   switch (op._instruction()) {
     case CodeTree::SUCCESS_OR_FAIL:
       if (op.isSuccess()) {
@@ -402,7 +422,14 @@ void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litSt
       }
       break;
     case CodeTree::LIT_END:
-      out << GREEN << "lit end" << CRESET;
+      ils = op.getILS();
+      out << GREEN << "lit end " << CRESET << "(nextCnt=" << ils->nextCnt << ", hasSuccessor=" << ils->hasSuccessor << ")";
+      out << " bins=[";
+      for (unsigned i=0; i < ils->nextBinSize; i++)  {
+        out << ils->nextBins[i];
+        if (i != ils->nextBinSize - 1) out << ", ";
+      }
+      out << "]";
       break;
     case CodeTree::CHECK_GROUND_TERM:
       out << YELLOW << "ground " << CRESET << *op.getTargetTerm();
@@ -411,6 +438,9 @@ void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litSt
       out << YELLOW << "check " << CRESET << functorStr(op._arg(), litStart);
       break;
     }
+    case CodeTree::NEXT:
+      out << YELLOW << "next " << op._arg() << CRESET;
+      break;
     case CodeTree::ASSIGN_VAR:
       out << YELLOW << "assign" << CRESET << " X" << op._arg();
       break;
@@ -1104,7 +1134,8 @@ void CodeTree::incorporate(CodeStack& code)
   ASS(code.top().isSuccess());
 
   if(isEmpty()) {
-    _entryPoint=buildBlock(code, code.length(), 0);
+    CodeBlock* block = buildBlock(code, code.length(), 0);
+    _entryPoint = &(*block)[0];
     code.reset();
     return;
   }
@@ -1345,7 +1376,7 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
       //we cannot replace it by its alternative as it is not a CodeBlock
       //(it's a SearchStruct). Therefore w will not delete it, just set
       //the first operation to fail.
-      ASS_EQ(cb,_entryPoint);
+      ASS_EQ(cb,getEntryBlock());
       firstOp->makeFail();
       return;
     }
@@ -1365,8 +1396,8 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
 
     if(firstsInBlocks->isEmpty()) {
       ASS(!alt || !alt->isSearchStruct());
-      ASS_EQ(cb,_entryPoint);
-      _entryPoint=alt ? firstOpToCodeBlock(alt) : 0;
+      ASS_EQ(cb,getEntryBlock());
+      _entryPoint = alt;
       return;
     }
 
