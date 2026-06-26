@@ -117,7 +117,7 @@ public:
 
     USE_ALLOCATOR(ClauseMatcher);
 
-  private:
+  protected:
     void enterLiteral(CodeOp* entry, bool seekOnlySuccess);
     void leaveLiteral();
     bool canEnterLiteral(CodeOp* op);
@@ -150,7 +150,7 @@ public:
     Stack<Recycled<LiteralMatcher, NoReset>> lms;
   };
 
-private:
+protected:
 
   //////// member variables //////////
 
@@ -192,6 +192,35 @@ class OptimizedClauseCodeTree : public ClauseCodeTree<higherOrder> {
 public:
   void insert(Clause* cl);
   void remove(Clause* cl);
+
+  struct OptimizedClauseMatcher : public ClauseCodeTree<higherOrder>::ClauseMatcher
+  {
+    using Base = typename ClauseCodeTree<higherOrder>::ClauseMatcher;
+    using LiteralMatcher = typename ClauseCodeTree<higherOrder>::LiteralMatcher;
+    using CheckPoint = typename LiteralMatcher::CheckPoint;
+    using MatchInfo = typename ClauseCodeTree<higherOrder>::MatchInfo;
+    using Base::lms;
+    using Base::sres;
+    using Base::query;
+    using Base::sresLiteral;
+    using Base::existsCompatibleMatch;
+    using Base::sresNoLiteral;
+    using Base::checkCandidate;
+    using Base::leaveLiteral;
+    using Base::lInfos;
+
+    void init(OptimizedClauseCodeTree<higherOrder>* tree_, Clause* query_, bool sres_);
+    Clause* next(int& resolvedQueryLit);
+
+    USE_ALLOCATOR(OptimizedClauseMatcher);
+
+  private:
+    void enterLiteral(CodeOp* entry, bool seekOnlySuccess, unsigned nextBinCnt, bool reachedByNextOp, Stack<CheckPoint>&& checkpoints);
+    bool canEnterLiteral(CodeOp* op);
+    OptimizedClauseCodeTree<higherOrder>* tree;
+  };
+
+  USE_ALLOCATOR(OptimizedClauseCodeTree);
 
 private:
 
@@ -252,6 +281,8 @@ private:
 
   friend Incorporator;
   unsigned nextBinCnt = 0;
+
+
 };
 
 

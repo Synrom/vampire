@@ -362,6 +362,9 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::appendBlo
     (*newBlock)[i] = (*block)[i];
     if ((*block)[i].isLitEnd()) {
       prev = (*block)[i].getILS();
+      if (!prev->hasSuccessor && i < cnt-1) {
+        prev->hasSuccessor = true;
+      }
     }
   }
   ASS(prev);
@@ -524,12 +527,15 @@ template<bool higherOrder>
 typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<higherOrder>::Incorporator::buildBlock(unsigned litIndex, unsigned matchedCnt, ILStruct* prev, bool stop, CodeOp* addedNextOp)
 {
   CodeStack code = codes[litIndex];
+  /*
   if (stop) {
-    CodeBlock* block = CodeTree::buildBlock(code, codes.size() - matchedCnt, prev);
+    CodeBlock* block = CodeTree::buildBlock(code, code.length() - matchedCnt, prev);
     return &(*block)[0];
   }
+  */
   unsigned cnt = 0;
-  for (unsigned i=litIndex; i < clen; i++) {
+  unsigned endIdx = stop ? litIndex+1 : clen;
+  for (unsigned i=litIndex; i < endIdx; i++) {
     if (i < clen - 1 && sharedPrefixes[i] > NextOpThreshold && sharedPrefixes[i] >= matchedCnt) {
       cnt += codes[i].length() + 1;
       if (i == litIndex) {
@@ -546,7 +552,7 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<h
   bool firstLit = true;
   CodeBlock* res = CodeBlock::allocate(cnt);
   unsigned codeIdx = 0;
-  while (litIndex < clen) {
+  while (litIndex < endIdx) {
     CodeStack code = codes[litIndex];
     if (litIndex < clen - 1 && sharedPrefixes[litIndex] > NextOpThreshold && sharedPrefixes[litIndex] >= matchedCnt) {
       CodeOp* nextOpReference = nullptr;
@@ -585,7 +591,7 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<h
         if (code[j].isLitEnd()) {
           code[j].getILS()->putIntoSequence(prev);
           ils = code[j].getILS();
-          ils->hasSuccessor = true;
+          ils->hasSuccessor = !stop;
           if (addedNextOp && firstLit) {
             firstLit = false;
             setNextOPArg(addedNextOp, ils);
@@ -757,6 +763,9 @@ typename OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock Optimi
       }
 
       ASS(treeOp->isLitEnd());
+      for (EvalSharingEntry& e : nextEntries) {
+        e.ils = treeOp->getILS();
+      }
       if (treeOp->getILS()->hasSuccessor) {
         nextEntries.push(EvalSharingEntry({treeOp+1, 0, state.block, state.reference, treeOp->getILS()}));
       }
@@ -1226,6 +1235,78 @@ void ClauseCodeTree<higherOrder>::ClauseMatcher::init(ClauseCodeTree* tree_, Cla
   enterLiteral(tree->getEntryPoint(), clen==0);
 }
 
+/**
+ * Initialize the ClauseMatcher to retrieve generalizetions
+ * of the @b query_ clause.
+ * If @b sres_ if true, we perform subsumption resolution
+ */
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::init(OptimizedClauseCodeTree<higherOrder>* tree_, Clause* query_, bool sres_)
+{
+  ASS(!tree_->isEmpty());
+
+  query=query_;
+  Base::tree=tree=tree_;
+  sres=sres_;
+  lms.reset();
+
+#if VDEBUG
+  ASS_EQ(tree->_clauseMatcherCounter,0);
+  tree->_clauseMatcherCounter++;
+#endif
+
+  //init LitInfo records
+  unsigned clen=query->length();
+  unsigned baseLICnt=clen;
+  for(unsigned i=0;i<clen;i++) {
+    if((*query)[i]->isEquality()) {
+      baseLICnt++;
+    }
+  }
+  unsigned liCnt=sres ? (baseLICnt*2) : baseLICnt;
+  lInfos.ensure(liCnt);
+
+  //we put ground literals first
+  unsigned liIndex=0;
+  for(unsigned i=0;i<clen;i++) {
+    if(!(*query)[i]->ground()) {
+      continue;
+    }
+    lInfos[liIndex]=LitInfo(query,i);
+    lInfos[liIndex].liIndex=liIndex;
+    liIndex++;
+    if((*query)[i]->isEquality()) {
+      lInfos[liIndex]=LitInfo::getReversed(lInfos[liIndex-1]);
+      lInfos[liIndex].liIndex=liIndex;
+      liIndex++;
+    }
+  }
+  for(unsigned i=0;i<clen;i++) {
+    if((*query)[i]->ground()) {
+      continue;
+    }
+    lInfos[liIndex]=LitInfo(query,i);
+    lInfos[liIndex].liIndex=liIndex;
+    liIndex++;
+    if((*query)[i]->isEquality()) {
+      lInfos[liIndex]=LitInfo::getReversed(lInfos[liIndex-1]);
+      lInfos[liIndex].liIndex=liIndex;
+      liIndex++;
+    }
+  }
+  if(sres) {
+    for(unsigned i=0;i<baseLICnt;i++) {
+      unsigned newIndex=i+baseLICnt;
+      lInfos[newIndex]=LitInfo::getOpposite(lInfos[i]);
+      lInfos[newIndex].liIndex=newIndex;
+    }
+    sresLiteral=sresNoLiteral;
+  }
+
+  tree->incTimeStamp();
+  enterLiteral(tree->getEntryPoint(), clen==0, tree->nextBinCnt, false, Stack<CheckPoint>());
+}
+
 template<bool higherOrder>
 void ClauseCodeTree<higherOrder>::ClauseMatcher::reset()
 {
@@ -1296,6 +1377,62 @@ Clause* ClauseCodeTree<higherOrder>::ClauseMatcher::next(int& resolvedQueryLit)
   }
 }
 
+/**
+ * Return next clause matching query or 0 if there is not such
+ */
+template<bool higherOrder>
+Clause* OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::next(int& resolvedQueryLit)
+{
+  if(lms.isEmpty()) {
+    return 0;
+  }
+
+  for(;;) {
+    LiteralMatcher* lm = &*lms.top();
+
+    //get next literal from the literal matcher
+    bool found=lm->next();
+
+    //if there's none, go one level up (or fail if at the top)
+    if(!found) {
+      leaveLiteral();
+      if(lms.isEmpty()) {
+	return 0;
+      }
+    }
+    else if(lm->op->isSuccess()) {
+      Clause* candidate=lm->op->template getSuccessResult<Clause>();
+      RSTAT_MCTR_INC("candidates", lms.size()-1);
+      if(checkCandidate(candidate, resolvedQueryLit)) {
+	RSTAT_MCTR_INC("candidates (success)", lms.size()-1);
+	return candidate;
+      }
+    }
+    else if(canEnterLiteral(lm->op)) {
+      ASS(lm->op->isLitEnd());
+      ASS_LE(lms.size(), query->length()); //this is due to the seekOnlySuccess part below
+      ILStruct* ils = lm->op->getILS();
+
+      CodeOp* newLitEntry=ils->hasSuccessor ? lm->op+1 : nullptr;
+
+      //check that we have cleared the sresLiteral value if it is no longer valid
+      ASS(!sres || sresLiteral==sresNoLiteral || sresLiteral<lms.size()-1);
+
+      if(sres && sresLiteral==sresNoLiteral) {
+	//we check whether we haven't matched only opposite literals on the previous level
+	if(ils->noNonOppositeMatches) {
+	  sresLiteral=lms.size()-1;
+	}
+      }
+
+      bool seekOnlySuccess=lms.size()==query->length();
+      ASS(ils->nextBinIdx == -1 || ils->nextBinIdx < lms.top()->nextBins.size());
+      Stack<CheckPoint> checkpoints = ils->reachedByNextOp() ? std::move(lms.top()->nextBins[ils->nextBinIdx]) : Stack<CheckPoint>();
+      enterLiteral(newLitEntry, seekOnlySuccess, ils->nextBinCnt, ils->reachedByNextOp(), std::move(checkpoints));
+    }
+  }
+}
+
 template<bool higherOrder>
 inline bool ClauseCodeTree<higherOrder>::ClauseMatcher::canEnterLiteral(CodeOp* op)
 {
@@ -1317,6 +1454,57 @@ inline bool ClauseCodeTree<higherOrder>::ClauseMatcher::canEnterLiteral(CodeOp* 
     for(size_t ilIndex=0;ilIndex<lms.size()-1;ilIndex++) {
       ILStruct* prevILS=lms[ilIndex]->getILS();
       if(prevILS->varCnt && !lms[ilIndex]->eagerlyMatched()) {
+	lms[ilIndex]->doEagerMatching();
+	RSTAT_MST_INC("match count", ilIndex, lms[ilIndex]->getILS()->matchCnt);
+      }
+
+      size_t matchIndex=ils->matchCnt;
+      while(matchIndex!=0) {
+	matchIndex--;
+	MatchInfo* mi=ils->getMatch(matchIndex);
+	if(!existsCompatibleMatch(ils, mi, prevILS)) {
+	  ils->deleteMatch(matchIndex); //decreases ils->matchCnt
+	}
+      }
+      if(!ils->matchCnt) {
+	return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+template<bool higherOrder>
+inline bool OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::canEnterLiteral(CodeOp* op)
+{
+  ASS(op->isLitEnd());
+  ASS_EQ(lms.top()->op, op);
+
+  ILStruct* ils=op->getILS();
+
+
+  if(ils->timestamp==tree->_curTimeStamp && ils->visited) {
+    return false;
+  }
+  if (ils->reachedByNextOp() && !op->hasSuccessor()) {
+    ASS(lms.top()->nextBins.size() > ils->nextBinIdx);
+    if (lms.top()->nextBins[ils->nextBinIdx].length() == 0)  {
+      return false;
+    }
+  }
+
+  //we have already matched and entered some index literals, so we
+  //will check for compatibility of variable assignments
+  if(!lms.top()->eagerlyMatched()) {
+    lms.top()->doEagerMatching();
+    RSTAT_MST_INC("match count", lms.size()-1, lms.top()->getILS()->matchCnt);
+  }
+
+  if(lms.size()>1) {
+    for(size_t ilIndex=0;ilIndex<lms.size()-1;ilIndex++) {
+      ILStruct* prevILS=lms[ilIndex]->getILS();
+      if(!lms[ilIndex]->eagerlyMatched()) {
 	lms[ilIndex]->doEagerMatching();
 	RSTAT_MST_INC("match count", ilIndex, lms[ilIndex]->getILS()->matchCnt);
       }
@@ -1375,6 +1563,46 @@ void ClauseCodeTree<higherOrder>::ClauseMatcher::enterLiteral(CodeOp* entry, boo
 
   Recycled<LiteralMatcher, NoReset> lm;
   lm->init(tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess, false, Stack<CheckPoint>(), 0);
+  lms.push(std::move(lm));
+}
+
+/**
+ * Enter literal matching starting at @c entry.
+ *
+ * @param entry the code tree node
+ * @param seekOnlySuccess if true, accept only SUCCESS operations
+ *   (this is to be used when all literals are matched so we want
+ *   to see just clauses that end at this point).
+ */
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuccess, unsigned nextBinCnt, bool reachedByNextOp, Stack<CheckPoint>&& checkpoints)
+{
+  if(!seekOnlySuccess) {
+    RSTAT_MCTR_INC("enterLiteral levels (non-sos)", lms.size());
+  }
+
+  if(lms.isNonEmpty()) {
+    Recycled<LiteralMatcher, NoReset>& prevLM = lms.top();
+    ILStruct* ils=prevLM->op->getILS();
+    ASS_EQ(ils->timestamp,tree->_curTimeStamp);
+    ASS(!ils->visited);
+    ASS(!ils->finished);
+    ils->visited=true;
+  }
+
+  size_t linfoCnt=lInfos.size();
+  if(sres && sresLiteral!=sresNoLiteral) {
+    ASS_L(sresLiteral,lms.size());
+    //we do not need to match index literals with opposite query
+    //literals, as one of already matched index literals matched only
+    //to opposite literals (and opposite literals cannot be matched
+    //on more than one index literal)
+    ASS_EQ(linfoCnt%2,0);
+    linfoCnt/=2;
+  }
+
+  Recycled<LiteralMatcher, NoReset> lm;
+  lm->init(tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess, reachedByNextOp, std::move(checkpoints), nextBinCnt);
   lms.push(std::move(lm));
 }
 

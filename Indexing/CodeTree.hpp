@@ -118,9 +118,11 @@ public:
     ILStruct* previous;
 
     unsigned varCnt;
+
     unsigned nextBinCnt=0;
-    bool hasSuccessor;
+    bool hasSuccessor=false;
     int nextBinIdx=-1;
+    inline bool reachedByNextOp() const { return nextBinIdx != -1; }
 
     unsigned* globalVarNumbers;
 

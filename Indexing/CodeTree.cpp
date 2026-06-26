@@ -415,7 +415,7 @@ void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litSt
       break;
     case CodeTree::LIT_END:
       ils = op.getILS();
-      out << GREEN << "lit end " << CRESET << "(nextBinCnt=" << ils->nextBinCnt << ", hasSuccessor=" << ils->hasSuccessor << ") binIdx=" << ils->nextBinIdx;
+      out << GREEN << "lit end " << CRESET << "(nextBinCnt=" << ils->nextBinCnt << ", hasSuccessor=" << ils->hasSuccessor << ") binIdx=" << ils->nextBinIdx << " depth=" << ils->depth;
       break;
     case CodeTree::CHECK_GROUND_TERM:
       out << YELLOW << "ground " << CRESET << *op.getTargetTerm();
@@ -742,6 +742,7 @@ bool CodeTree::Matcher<removing, checkRange, higherOrder>::prepareLiteral()
         RemovingBase::firstsInBlocks->truncate(bp.fibDepth);
         RemovingBase::firstsInBlocks->push(op);
       }
+      return true;
     }
   }
   if constexpr (removing) {
