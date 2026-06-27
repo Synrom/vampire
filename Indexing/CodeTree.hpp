@@ -15,6 +15,8 @@
 #ifndef __CodeTree__
 #define __CodeTree__
 
+#include <tuple>
+
 #include "Forwards.hpp"
 
 #include "Lib/Allocator.hpp"
@@ -123,6 +125,7 @@ public:
     bool hasSuccessor=false;
     int nextBinIdx=-1;
     inline bool reachedByNextOp() const { return nextBinIdx != -1; }
+    unsigned refCount=1;
 
     unsigned* globalVarNumbers;
 
@@ -473,7 +476,47 @@ public:
   static CodeBlock* firstOpToCodeBlock(CodeOp* op);
 
   template<class Visitor>
-  void visitAllOps(Visitor visitor) const;
+  void visitAllOps(Visitor visitor) const
+  {
+    // operation, depth, and flag indicating whether the next functor is a predicate
+    static Stack<std::tuple<CodeOp*,unsigned,bool>> top_ops;
+    // each top_op is either a first op of a Block or a SearchStruct
+    // but it cannot be both since SearchStructs don't occur inside blocks
+    top_ops.reset();
+
+    if(!isEmpty()) { top_ops.emplace(getEntryPoint(),0,_clauseCodeTree); }
+
+    while(top_ops.isNonEmpty()) {
+      auto [top_op,depth,litStart] = top_ops.pop();
+
+      if (top_op->isSearchStruct()) {
+        visitor(top_op, depth, litStart); // visit the landingOp inside the SearchStruct
+
+        if(top_op->alternative()) {
+          top_ops.emplace(top_op->alternative(),depth,litStart);
+        }
+
+        auto ss = top_op->getSearchStruct();
+        for (size_t i = 0; i < ss->length(); i++) {
+          if (ss->targets[i]!=0) { // zeros are allowed as targets (they are holes after removals)
+            top_ops.emplace(ss->targets[i],depth+1,litStart);
+          }
+        }
+      } else {
+        CodeBlock* cb=firstOpToCodeBlock(top_op);
+
+        CodeOp* op=&(*cb)[0];
+        ASS_EQ(top_op,op);
+        for(size_t rem=cb->length(); rem; rem--,op++) {
+          visitor(op, depth+(cb->length()-rem), litStart);
+          if(op->alternative()) {
+            top_ops.emplace(op->alternative(),depth+(cb->length()-rem),litStart);
+          }
+          litStart = op->isLitEnd();
+        }
+      }
+    }
+  }
 
   void printOp(std::ostream& out, const CodeOp& op, bool litStart) const;
   void printOps(std::ostream& out, const CodeTree& ct, const CodeStack& st) const;

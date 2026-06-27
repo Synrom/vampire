@@ -671,6 +671,7 @@ void CodeTree::Matcher<removing, checkRange, higherOrder>::init(CodeTree* tree_,
   nextBins.ensure(nrNextBins);
   for (Stack<CheckPoint>& bin: nextBins) {
     bin.reset();
+    bin.reserve(linfoCnt);
   }
   executingNormally = false;
 
@@ -722,6 +723,7 @@ bool CodeTree::Matcher<removing, checkRange, higherOrder>::prepareLiteral()
     }
     if (checkpoints.isEmpty()) {
       if (!entry) {
+        fresh = false;
         return false;
       } else {
         executingNormally = true;
@@ -970,49 +972,6 @@ CodeTree::CodeBlock* CodeTree::firstOpToCodeBlock(CodeOp* op)
   return GET_CONTAINING_OBJECT(CodeTree::CodeBlock,_array,op);
 }
 
-
-template<class Visitor>
-void CodeTree::visitAllOps(Visitor visitor) const
-{
-  // operation, depth, and flag indicating whether the next functor is a predicate
-  static Stack<tuple<CodeOp*,unsigned,bool>> top_ops;
-  // each top_op is either a first op of a Block or a SearchStruct
-  // but it cannot be both since SearchStructs don't occur inside blocks
-  top_ops.reset();
-
-  if(!isEmpty()) { top_ops.emplace(getEntryPoint(),0,_clauseCodeTree); }
-
-  while(top_ops.isNonEmpty()) {
-    auto [top_op,depth,litStart] = top_ops.pop();
-
-    if (top_op->isSearchStruct()) {
-      visitor(top_op, depth, litStart); // visit the landingOp inside the SearchStruct
-
-      if(top_op->alternative()) {
-        top_ops.emplace(top_op->alternative(),depth,litStart);
-      }
-
-      auto ss = top_op->getSearchStruct();
-      for (size_t i = 0; i < ss->length(); i++) {
-        if (ss->targets[i]!=0) { // zeros are allowed as targets (they are holes after removals)
-          top_ops.emplace(ss->targets[i],depth+1,litStart);
-        }
-      }
-    } else {
-      CodeBlock* cb=firstOpToCodeBlock(top_op);
-
-      CodeOp* op=&(*cb)[0];
-      ASS_EQ(top_op,op);
-      for(size_t rem=cb->length(); rem; rem--,op++) {
-        visitor(op, depth+(cb->length()-rem), litStart);
-        if(op->alternative()) {
-          top_ops.emplace(op->alternative(),depth+(cb->length()-rem),litStart);
-        }
-        litStart = op->isLitEnd();
-      }
-    }
-  }
-}
 
 void CodeTree::printOps(std::ostream& out, const CodeTree& ct, const CodeTree::CodeStack& st) const
 {
@@ -1438,11 +1397,23 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
 
     CodeOp firstOpCopy= *firstOp;
 
+    if(firstsInBlocks->isEmpty()) {
+      ASS(!alt || !alt->isSearchStruct());
+      ASS_EQ(cb,getEntryBlock());
+    }
+
+    ILStruct* prev = nullptr;
     if(_clauseCodeTree) {
       //delete ILStruct objects
       size_t cbLen=cb->length();
       for(size_t i=0;i<cbLen;i++) {
         if((*cb)[i].isLitEnd()) {
+          prev = (*cb)[i].getILS()->previous;
+          ILStruct* ils = prev;
+          while (ils) {
+            ils->refCount--;
+            ils = ils->previous;
+          }
           delete (*cb)[i].getILS();
         }
       }
@@ -1450,8 +1421,6 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
     cb->deallocate(); //from now on we mustn't dereference firstOp
 
     if(firstsInBlocks->isEmpty()) {
-      ASS(!alt || !alt->isSearchStruct());
-      ASS_EQ(cb,getEntryBlock());
       _entryPoint = alt;
       return;
     }
@@ -1519,6 +1488,11 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
     while(prevOp!=prevAfterLastOp) {
       ASS_NEQ(prevOp->alternative(),firstOp);
 
+      if(prevOp->isLitEnd()) {
+        if (prevOp->getILS() != prev || prevOp->getILS()->refCount > 0) {
+          return;
+        }
+      }
       if(prevOp->alternative() || prevOp->isSuccess()) {
         //there is an operation after the pointingOp that cannot be lost
         return;

@@ -115,7 +115,7 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::optimizeInterClausalLit
   lits.sort(InitialLiteralOrderingComparator());
 
   Stack<EvalSharingEntry> entries;
-  entries.push(EvalSharingEntry{tree.getEntryPoint(), 0, tree.getEntryBlock(), &tree._entryPoint, 0});
+  entries.push(EvalSharingEntry{tree.getEntryPoint(), 0, tree.getEntryBlock(), &tree._entryPoint, 0, Stack<unsigned>()});
   for(unsigned startIndex=0;startIndex<clen;startIndex++) {
 //  for(unsigned startIndex=0;startIndex<1;startIndex++) {
 
@@ -145,8 +145,9 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::optimizeInterClausalLit
 
   have_best:
     swap(startIndex,bestIndex);
+    bestMatch.litIndex = startIndex;
 
-    if (bestMatch.partial) {
+    if (bestMatch.partial || startIndex == clen-1) {
       partiallyMatched = true;
       partiallyMatchedBlock = bestMatch;
       return;
@@ -312,8 +313,10 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::destroy()
 template<bool higherOrder>
 void OptimizedClauseCodeTree<higherOrder>::Incorporator::incorporate()
 {
-  // first find the point to inser the new block in
+
+  // first find the point to insert the new block in
   optimizeLiteralOrder();
+  codes[clen-1].push(CodeOp::getSuccess(clause));
 
   // insert the block
   if (!fullyMatched && !partiallyMatched) {
@@ -327,7 +330,7 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::incorporate()
   unsigned partialSharedPrefix = partiallyMatchedBlock.litIndex < clen - 1 ? sharedPrefixes[partiallyMatchedBlock.litIndex] : 0;
 
   if (fullyMatched && partiallyMatchedBlock.block == nullptr) {
-    CodeOp* blockOp = buildBlock(partiallyMatchedBlock.litIndex, 0, 0, false, nullptr);
+    CodeOp* blockOp = buildBlock(partiallyMatchedBlock.litIndex, 0, fullyMatchedBlock.findILS(), false, nullptr);
     fullyMatchedBlock.appendBlock(CodeTree::firstOpToCodeBlock(blockOp));
   } else if (fullSharedPrefix > max(NextOpThreshold, partiallyMatchedBlock.matchedOps)) {
     CodeOp* nextOp = fullyMatchedBlock.addNextOp(fullSharedPrefix, *this, true);
@@ -352,23 +355,71 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::incorporate()
 
   destroy();
 }
+
+
 template<bool higherOrder>
 void OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::appendBlock(CodeBlock* nextBlock)
 {
-  unsigned cnt = block->length() + nextBlock->length();
+  CodeOp** referenceLastBlock = reference;
+  CodeBlock* lastBlock = block;
+  unsigned pathIdx = &(*lastBlock)[0] == matchedPath[0] ? 1 : 0;
+  CodeOp* treeOp = &(*lastBlock)[0];
+
+  while (pathIdx < matchedPath.length()) {
+    for (;;) {
+      if (matchedPath[pathIdx] == treeOp) {
+        pathIdx++;
+        if (pathIdx >= matchedPath.length()) break;
+      }
+      if (matchedPath[pathIdx] == treeOp->alternative()) {
+        referenceLastBlock = &treeOp->alternative();
+        lastBlock = CodeTree::firstOpToCodeBlock(treeOp->alternative());
+        treeOp = treeOp->alternative();
+        pathIdx++;
+        if (pathIdx >= matchedPath.length()) break;
+        continue;
+      }
+      if (treeOp->isSearchStruct()) {
+        SearchStruct* ss = treeOp->getSearchStruct();
+        CodeOp** toPtr;
+        if (ss->template getTargetOpPtr<false>(*matchedPath[pathIdx], toPtr) && *toPtr) {
+          ASS_EQ(*toPtr, matchedPath[pathIdx]);
+          referenceLastBlock = toPtr;
+          treeOp = matchedPath[pathIdx];
+          lastBlock = CodeTree::firstOpToCodeBlock(treeOp);
+          pathIdx++;
+        }
+        if (pathIdx >= matchedPath.length()) break;
+        continue;
+      }
+      if (treeOp->isNext()) {
+        treeOp++;
+        continue;
+      }
+      break;
+    }
+    if (pathIdx >= matchedPath.length()) break;
+    ASS(!treeOp->isSearchStruct());
+    if (!treeOp->hasSuccessor()) {
+      ASS(false);
+    }
+    treeOp++;
+  }
+
+  unsigned cnt = lastBlock->length() + nextBlock->length();
   CodeBlock* newBlock = CodeBlock::allocate(cnt);
   ILStruct* prev = nullptr;
-  for (unsigned i=0; i < block->length(); i++) {
-    (*newBlock)[i] = (*block)[i];
-    if ((*block)[i].isLitEnd()) {
-      prev = (*block)[i].getILS();
+  for (unsigned i=0; i < lastBlock->length(); i++) {
+    (*newBlock)[i] = (*lastBlock)[i];
+    if ((*lastBlock)[i].isLitEnd()) {
+      prev = (*lastBlock)[i].getILS();
       if (!prev->hasSuccessor && i < cnt-1) {
         prev->hasSuccessor = true;
       }
     }
   }
   ASS(prev);
-  unsigned sOfs = block->length();
+  unsigned sOfs = lastBlock->length();
   bool encounteredIls = false;
   for (unsigned i=0; i < nextBlock->length(); i++) {
     if ((*nextBlock)[i].isLitEnd() && !encounteredIls) {
@@ -377,8 +428,8 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::appendBlo
     }
     (*newBlock)[i + sOfs] = (*nextBlock)[i];
   }
-  *reference = &(*newBlock)[0];
-  block->deallocate();
+  *referenceLastBlock = &(*newBlock)[0];
+  lastBlock->deallocate();
   nextBlock->deallocate();
 }
 
@@ -460,6 +511,68 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<h
   return nextOpReference;
 }
 
+template<bool higherOrder>
+typename OptimizedClauseCodeTree<higherOrder>::ILStruct* OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::findILS()
+{
+  ASS(matchedPath.length() > 0);
+  ASS(!partial);
+
+  CodeOp* treeOp = matchedPath[0];
+  unsigned pathIdx = 1;
+  for (unsigned int i=0;i < matchedOps-1; i++) {
+    for (;;) {
+      if (pathIdx < matchedPath.length() && matchedPath[pathIdx] == treeOp->alternative()) {
+        treeOp = treeOp->alternative();
+        pathIdx++;
+        continue;
+      }
+      if (treeOp->isSearchStruct()) {
+        SearchStruct* ss = treeOp->getSearchStruct();
+        CodeOp** toPtr;
+        if (ss->template getTargetOpPtr<false>(*matchedPath[pathIdx], toPtr) && *toPtr) {
+          ASS_EQ(*toPtr, matchedPath[pathIdx]);
+          treeOp = matchedPath[pathIdx];
+          pathIdx++;
+        }
+        continue;
+      }
+      if (treeOp->isNext()) {
+        treeOp++;
+        continue;
+      }
+      break;
+    }
+    ASS(!treeOp->isSearchStruct());
+    if (!treeOp->hasSuccessor()) {
+      return nullptr;
+    }
+    treeOp++;
+  }
+  for (;;) {
+    if (pathIdx < matchedPath.length() && matchedPath[pathIdx] == treeOp->alternative()) {
+      treeOp = treeOp->alternative();
+      pathIdx++;
+      continue;
+    }
+    if (treeOp->isSearchStruct()) {
+      SearchStruct* ss = treeOp->getSearchStruct();
+      CodeOp** toPtr;
+      if (ss->template getTargetOpPtr<false>(*matchedPath[pathIdx], toPtr) && *toPtr) {
+        ASS_EQ(*toPtr, matchedPath[pathIdx]);
+        treeOp = matchedPath[pathIdx];
+        pathIdx++;
+      }
+      continue;
+    }
+    if (treeOp->isNext()) {
+      treeOp++;
+      continue;
+    }
+    break;
+  }
+  ASS(treeOp->isLitEnd());
+  return treeOp->getILS();
+}
 
 template<bool higherOrder>
 typename OptimizedClauseCodeTree<higherOrder>::CodeOp** OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::findInsertionReference()
@@ -536,7 +649,7 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<h
   unsigned cnt = 0;
   unsigned endIdx = stop ? litIndex+1 : clen;
   for (unsigned i=litIndex; i < endIdx; i++) {
-    if (i < clen - 1 && sharedPrefixes[i] > NextOpThreshold && sharedPrefixes[i] >= matchedCnt) {
+    if (i < clen - 1 && sharedPrefixes[i] > NextOpThreshold && (i > litIndex || sharedPrefixes[i] >= matchedCnt)) {
       cnt += codes[i].length() + 1;
       if (i == litIndex) {
         cnt -= matchedCnt;
@@ -552,9 +665,10 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<h
   bool firstLit = true;
   CodeBlock* res = CodeBlock::allocate(cnt);
   unsigned codeIdx = 0;
+  unsigned firstLitIndex = litIndex;
   while (litIndex < endIdx) {
     CodeStack code = codes[litIndex];
-    if (litIndex < clen - 1 && sharedPrefixes[litIndex] > NextOpThreshold && sharedPrefixes[litIndex] >= matchedCnt) {
+    if (litIndex < clen - 1 && sharedPrefixes[litIndex] > NextOpThreshold && (litIndex > firstLitIndex || sharedPrefixes[litIndex] >= matchedCnt)) {
       CodeOp* nextOpReference = nullptr;
       ILStruct* ils = nullptr;
       unsigned sOfs = matchedCnt;
@@ -637,9 +751,6 @@ OptimizedClauseCodeTree<higherOrder>::Incorporator::Incorporator(Clause* cl, Opt
   for(unsigned i=0;i<clen;i++) {
     compiler.nextLit();
     compiler.handleTerm(lits[i]);
-    if (i == clen-1) {
-      code.push(CodeOp::getSuccess(cl));
-    }
     codes[i] = std::move(code);
   }
 
@@ -659,6 +770,7 @@ typename OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock Optimi
     unsigned i;
     unsigned distance;
     Stack<CodeOp*> path;
+    unsigned nextBinPathIdx;
 
     CodeBlock* block;
     CodeOp** reference;
@@ -666,6 +778,7 @@ typename OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock Optimi
   };
 
   MatchedBlock result = MatchedBlock{true, litIndex, 0, Stack<CodeOp*>(), nullptr, nullptr, nullptr};
+  ILStruct* thisILS  = nullptr;
 
   for (EvalSharingEntry entry : startOps) {
     CodeOp* entryOp = entry.entry;
@@ -675,7 +788,7 @@ typename OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock Optimi
     {
       Stack<CodeOp*> stack;
       stack.push(entry.entry);
-      queue.push(MatchingState{entry.entry, 0, 0, stack, entry.block, entry.reference, entry.ils});
+      queue.push(MatchingState{entry.entry, 0, 0, stack, 0, entry.block, entry.reference, entry.ils});
     }
     while (queue.isNonEmpty()) {
       MatchingState state = queue.pop();
@@ -687,6 +800,12 @@ typename OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock Optimi
 
       unsigned i = state.i;
       for (; i < clen; i++) {
+        CodeOp* chainStart = treeOp;
+        size_t checkFunOps = 0;
+        size_t checkGroundTermOps = 0;
+        unsigned queueChainStartLength = queue.length();
+        unsigned stateChainStartLength = state.path.length();
+
         for (;;) {
           if (treeOp->isSearchStruct()) {
             SearchStruct* ss = treeOp->getSearchStruct();
@@ -704,27 +823,65 @@ typename OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock Optimi
           ASS_NEQ(treeOp, treeOp->alternative());
           if (treeOp->isNext()) {
             if (state.distance == necessaryDistance) {
+              Stack<unsigned> nextOpIndices;
+              for (CodeOp* branch : state.path) {
+                if (branch->isNext()) {
+                  nextOpIndices.push(branch->_arg());
+                }
+              }
+              nextOpIndices.push(treeOp->_arg());
               bool alreadyExists = false;
               for (EvalSharingEntry nextEntry : nextEntries) {
-                if (nextEntry.entry == entryOp) {
+                if (nextEntry.entry == entryOp && nextOpIndices.top() == nextEntry.nextOpIndices.top()) {
                   alreadyExists = true;
                   break;
                 }
               }
               if (!alreadyExists) {
-                nextEntries.push(EvalSharingEntry{entryOp, necessaryDistance+1, entry.block, entry.reference, entry.ils});
+                nextEntries.push(EvalSharingEntry{entryOp, necessaryDistance+1, entry.block, entry.reference, entry.ils, nextOpIndices});
               }
-            } else {
+            } else if (state.nextBinPathIdx < entry.nextOpIndices.length() && entry.nextOpIndices[state.nextBinPathIdx] == treeOp->_arg()) {
               ASS(state.distance < necessaryDistance);
               Stack<CodeOp*> newPath = state.path;
               newPath.push(treeOp->alternative());
-              queue.push(MatchingState{treeOp->alternative(), i, state.distance+1, newPath, CodeTree::firstOpToCodeBlock(treeOp->alternative()), &treeOp->alternative(), currentIls}); 
+              queue.push(MatchingState{treeOp->alternative(), i, state.distance+1, newPath, state.nextBinPathIdx+1, CodeTree::firstOpToCodeBlock(treeOp->alternative()), &treeOp->alternative(), currentIls}); 
             }
             treeOp++;
             continue;
           }
           if (treeOp->alternative()) {
-            currentBlock = CodeTree::firstOpToCodeBlock(treeOp->alternative());
+            if (treeOp->alternative()->isCheckFun()) {
+              checkFunOps++;
+              //if there were too many CHECK_FUN alternative operations, put them
+              //into a SEARCH_STRUCT
+              if (checkFunOps > CheckFunOpThreshold) {
+                //we put CHECK_FUN ops into the SEARCH_STRUCT op, and
+                //restart with the chain
+                tree.template compressCheckOps<SearchStruct::FN_STRUCT>(chainStart);
+                treeOp = chainStart;
+                checkFunOps = 0;
+                checkGroundTermOps = 0;
+                queue.truncate(queueChainStartLength);
+                state.path.truncate(stateChainStartLength);
+                continue;
+              }
+            } else if (treeOp->alternative()->isCheckGroundTerm()) {
+              checkGroundTermOps++;
+              //if there were too many CHECK_GROUND_TERM alternative operations, put them
+              //into a SEARCH_STRUCT
+              if (checkGroundTermOps > CheckGroundTermOpThreshold) {
+                //we put CHECK_GROUND_TERM ops into the SEARCH_STRUCT op, and
+                //restart with the chain
+                tree.template compressCheckOps<SearchStruct::GROUND_TERM_STRUCT>(chainStart);
+                treeOp = chainStart;
+                checkFunOps = 0;
+                checkGroundTermOps = 0;
+                queue.truncate(queueChainStartLength);
+                state.path.truncate(stateChainStartLength);
+                continue;
+              }
+            }
+            currentBlock = treeOp->alternative()->isSearchStruct() ? currentBlock : CodeTree::firstOpToCodeBlock(treeOp->alternative());
             currentReference = &treeOp->alternative();
             treeOp = treeOp->alternative();
             state.path.push(treeOp);
@@ -763,11 +920,18 @@ typename OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock Optimi
       }
 
       ASS(treeOp->isLitEnd());
-      for (EvalSharingEntry& e : nextEntries) {
-        e.ils = treeOp->getILS();
+      thisILS = treeOp->getILS();
+      thisILS->refCount++;
+      for (unsigned i=nextEntries.length()-1; i >= 0 && nextEntries.length() > 0; i--) {
+        if (nextEntries[i].nextOpIndices.top() != thisILS->nextBinIdx) {
+          nextEntries.swapRemove(i);
+        } else {
+          nextEntries[i].ils = thisILS;
+        }
+        if (i==0) break;
       }
       if (treeOp->getILS()->hasSuccessor) {
-        nextEntries.push(EvalSharingEntry({treeOp+1, 0, state.block, state.reference, treeOp->getILS()}));
+        nextEntries.push(EvalSharingEntry({treeOp+1, 0, currentBlock, currentReference, treeOp->getILS(), Stack<unsigned>()}));
       }
 
       return MatchedBlock {
@@ -946,7 +1110,7 @@ void OptimizedClauseCodeTree<higherOrder>::remove(Clause* cl)
     {
       Recycled<RemovingLiteralMatcher, NoReset> rrlm; // take rlm out of recycling
       rlm = &*rrlm; // get the actual content (also to use after this initialization block)
-      rlm->init(op, lInfos.array(), lInfos.size(), this, &*firstsInBlocks); // init it
+      rlm->init(op, lInfos.array(), lInfos.size(), this, &*firstsInBlocks, false, Stack<typename RemovingLiteralMatcher::CheckPoint>(), nextBinCnt); // init it
       rlms->push(std::move(rrlm)); // store it in rlms (along with the obligation to return to recycling when no longer used)
     }
 
@@ -991,9 +1155,9 @@ void OptimizedClauseCodeTree<higherOrder>::remove(Clause* cl)
 
 template<bool higherOrder>
 void ClauseCodeTree<higherOrder>::RemovingLiteralMatcher::init(CodeOp* entry_, LitInfo* linfos_,
-    size_t linfoCnt_, ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_)
+    size_t linfoCnt_, ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_, bool reachedByNext_, Stack<CheckPoint>&& checkpoints_, unsigned nrNextBins)
 {
-  Base::init(tree_, entry_, linfos_, linfoCnt_, firstsInBlocks_, false, Stack<CheckPoint>(), 0);
+  Base::init(tree_, entry_, linfos_, linfoCnt_, firstsInBlocks_, reachedByNext_, std::move(checkpoints_), nrNextBins);
 
   ALWAYS(Base::prepareLiteral());
 }
@@ -1020,6 +1184,181 @@ bool ClauseCodeTree<higherOrder>::removeOneOfAlternatives(CodeOp* op, Clause* cl
   return true;
 }
 
+/**
+ * The first operation of the CodeBlock containing @b op
+ * must already be on the @b firstsInBlocks stack.
+ */
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::removeOneOfAlternatives(CodeOp* op, Clause* cl, Stack<CodeOp*>* firstsInBlocks)
+{
+  unsigned initDepth=firstsInBlocks->size();
+
+  while(!op->isSuccess() || op->template getSuccessResult<Clause>()!=cl) {
+    op=op->alternative();
+    if(!op) {
+      firstsInBlocks->truncate(initDepth);
+      return false;
+    }
+    firstsInBlocks->push(op);
+  }
+  op->makeFail();
+  optimizeMemoryAfterRemoval(firstsInBlocks, op);
+  return true;
+}
+
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp* removedOp)
+{
+  ASS(removedOp->isFail());
+  LOG_OP("Code tree removal memory optimization");
+  LOG_OP("firstsInBlocks->size()="<<firstsInBlocks->size());
+
+  //now let us remove unnecessary instructions and the free memory
+
+  CodeOp* op=removedOp;
+  ASS(firstsInBlocks->isNonEmpty());
+  CodeOp* firstOp=firstsInBlocks->pop();
+  for(;;) {
+    //firstOp is in a CodeBlock
+    ASS(!firstOp->isSearchStruct());
+    //op is in the CodeBlock starting at firstOp
+    ASS_LE(firstOp, op);
+    ASS_G(firstOp+CodeTree::firstOpToCodeBlock(firstOp)->length(), op);
+
+    while(op>firstOp && !op->alternative()) { ASS(!op->isSuccess()); op--; }
+
+    ASS(!op->isSuccess());
+
+    if(op!=firstOp) {
+      ASS(op->alternative());
+      //we only change the instruction, the alternative must remain unchanged
+      op->makeFail();
+      return;
+    }
+    CodeOp* alt=firstOp->alternative();
+
+    CodeBlock* cb=CodeTree::firstOpToCodeBlock(firstOp);
+
+    if(firstsInBlocks->isEmpty() && alt && alt->isSearchStruct()) {
+      //We should remove the CodeBlock referenced by _entryPoint, but
+      //we cannot replace it by its alternative as it is not a CodeBlock
+      //(it's a SearchStruct). Therefore w will not delete it, just set
+      //the first operation to fail.
+      ASS_EQ(cb,getEntryBlock());
+      firstOp->makeFail();
+      return;
+    }
+
+    CodeOp firstOpCopy= *firstOp;
+
+    if(firstsInBlocks->isEmpty()) {
+      ASS(!alt || !alt->isSearchStruct());
+      ASS_EQ(cb,getEntryBlock());
+    }
+
+    ILStruct* prev = nullptr;
+    if(_clauseCodeTree) {
+      //delete ILStruct objects
+      size_t cbLen=cb->length();
+      for(size_t i=cbLen-1;cbLen > 0;i--) {
+        if((*cb)[i].isLitEnd()) {
+          prev = (*cb)[i].getILS()->previous;
+          ILStruct* ils = prev;
+          while (ils) {
+            ils->refCount--;
+            ils = ils->previous;
+          }
+          delete (*cb)[i].getILS();
+        }
+        if (i==0) break;
+      }
+    }
+    cb->deallocate(); //from now on we mustn't dereference firstOp
+
+    if(firstsInBlocks->isEmpty()) {
+      _entryPoint = alt;
+      return;
+    }
+
+    //first operation in the CodeBlock that points to the current one (i.e. cb)
+    CodeOp* prevFirstOp=firstsInBlocks->pop();
+
+    if(prevFirstOp->isSearchStruct()) {
+      if(prevFirstOp->alternative()==firstOp) {
+        //firstOp was an alternative to the SearchStruct
+        prevFirstOp->setAlternative(alt);
+        return;
+      }
+      auto ss = prevFirstOp->getSearchStruct();
+      CodeOp** tgtPtr;
+      ALWAYS(ss->template getTargetOpPtr<false>(firstOpCopy, tgtPtr));
+      ASS_EQ(*tgtPtr, firstOp);
+      *tgtPtr=alt;
+      if(alt) {
+        ASS( (ss->kind==SearchStruct::FN_STRUCT && alt->isCheckFun()) ||
+            (ss->kind==SearchStruct::GROUND_TERM_STRUCT && alt->isCheckGroundTerm()) );
+        return;
+      }
+      for(size_t i=0; i<ss->length(); i++) {
+        if(ss->targets[i]!=0) {
+          //the SearchStruct still contains something, so we won't delete it
+          //TODO: we might want to compress the SearchStruct, if there are too many zeroes
+          return;
+        }
+      }
+
+      //if we're at this point, the SEARCH_STRUCT will be deleted
+      firstOp=&ss->landingOp;
+      alt=ss->landingOp.alternative();
+      ss->destroy();
+
+      //now let's continue as if there wasn't any SEARCH_STRUCT operation:)
+
+      //the SEARCH_STRUCT is never the first operation in the CodeTree
+      ASS(firstsInBlocks->isNonEmpty());
+      prevFirstOp=firstsInBlocks->pop();
+      //there never are two nested SEARCH_STRUCT operations
+      ASS(!prevFirstOp->isSearchStruct());
+    }
+
+    CodeBlock* pcb=CodeTree::firstOpToCodeBlock(prevFirstOp);
+
+    //operation that points to the current CodeBlock
+    CodeOp* pointingOp=0;
+
+    CodeOp* prevAfterLastOp=prevFirstOp+pcb->length();
+    CodeOp* prevOp=prevFirstOp;
+    while(prevOp->alternative()!=firstOp) {
+      ASS_L(prevOp,prevAfterLastOp);
+      prevOp++;
+    }
+    pointingOp=prevOp;
+
+    pointingOp->setAlternative(alt);
+    if(pointingOp->isSuccess()) {
+      return;
+    }
+
+    prevOp++;
+    while(prevOp!=prevAfterLastOp) {
+      ASS_NEQ(prevOp->alternative(),firstOp);
+
+      if(prevOp->isLitEnd()) {
+        if (prevOp->getILS() != prev || prevOp->getILS()->refCount > 0) {
+          return;
+        }
+      }
+      if(prevOp->alternative() || prevOp->isSuccess()) {
+        //there is an operation after the pointingOp that cannot be lost
+        return;
+      }
+      prevOp++;
+    }
+
+    firstOp=prevFirstOp;
+    op=pointingOp;
+  }
+}
 //////////////// retrieval ////////////////////
 
 ////////// LiteralMatcher
@@ -1059,7 +1398,7 @@ void ClauseCodeTree<higherOrder>::LiteralMatcher::init(CodeTree* tree_, CodeOp* 
     return;
   }
 
-  ALWAYS(Base::prepareLiteral());
+  Base::prepareLiteral();
 }
 
 /**
@@ -1234,6 +1573,131 @@ void ClauseCodeTree<higherOrder>::ClauseMatcher::init(ClauseCodeTree* tree_, Cla
   tree->incTimeStamp();
   enterLiteral(tree->getEntryPoint(), clen==0);
 }
+
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkSuccessAndFailOperationsAreFinal()
+{
+  Stack<CodeOp*> queue;
+  queue.push(tree._entryPoint);
+  while (queue.isNonEmpty()) {
+    CodeOp* blockOp = queue.pop();
+    if (blockOp->isSearchStruct()) {
+      auto ss = blockOp->getSearchStruct();
+      for (unsigned i = 0; i < ss->length(); i++) {
+        if (ss->targets[i]) {
+          queue.push(ss->targets[i]);
+        }
+      }
+    } else {
+      CodeBlock* block = CodeTree::firstOpToCodeBlock(blockOp);
+      for (unsigned i=0;i < block->length(); i++) {
+        CodeOp* op = &(*block)[i];
+        if (op->alternative()) {
+          queue.push(op->alternative());
+        }
+        if (op->isSuccess() || op->isFail()) {
+          if (i != block->length() - 1) {
+            std::cout << "Tree has SUCESS or FAIL ops that are not final:" << std::endl << tree << std::endl;
+          }
+          ASS_EQ(i, block->length() - 1);
+        }
+      }
+    }
+  }
+  return true;
+}
+
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkAllClausesAppear(std::vector<Clause*> clauses)
+{
+  std::vector<bool> appears(clauses.size(), false);
+  Stack<CodeOp*> queue;
+  queue.push(tree._entryPoint);
+  while (queue.isNonEmpty()) {
+    CodeOp* blockOp = queue.pop();
+    if (blockOp->isSearchStruct()) {
+      auto ss = blockOp->getSearchStruct();
+      for (unsigned i = 0; i < ss->length(); i++) {
+        if (ss->targets[i]) {
+          queue.push(ss->targets[i]);
+        }
+      }
+    } else {
+      CodeBlock* block = CodeTree::firstOpToCodeBlock(blockOp);
+      for (unsigned i=0; i< block->length(); i++) {
+        CodeOp* op = &(*block)[i];
+        if (op->isSuccess())  {
+          Clause* cl = op->template getSuccessResult<Clause>();
+          for (unsigned i=0; i < clauses.size(); i++) {
+            if (clauses[i] == cl) {
+              appears[i] = true;
+            }
+          }
+        }
+        if (op->alternative()) {
+          queue.push(op->alternative());
+        }
+      }
+    }
+  }
+  bool all = true;
+  for (bool v: appears) {
+    all &= v;
+  }
+  ASS(all);
+  return all;
+}
+
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkNoFailOps()
+{
+  bool check = true;
+  tree.visitAllOps([&check](const CodeOp* op, unsigned depth, bool litStart) {
+    if (op->isFail()) {
+      check = false;
+    }
+  });
+  ASS(check);
+  return check;
+}
+
+
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkILSDepths()
+{
+  Stack<std::pair<CodeOp*, unsigned>> queue;
+  queue.push(std::make_pair(tree._entryPoint, 0));
+  while(queue.isNonEmpty()) {
+    std::pair<CodeOp*, unsigned> entry = queue.pop();
+    unsigned depth = entry.second;
+    if (entry.first->isSearchStruct()) {
+      auto ss = entry.first->getSearchStruct();
+      for (unsigned i = 0; i < ss->length(); i++) {
+        if (ss->targets[i]) {
+          queue.push(std::make_pair(ss->targets[i], depth));
+        }
+      }
+    } else {
+      CodeBlock* block = CodeTree::firstOpToCodeBlock(entry.first);
+      for (unsigned i=0; i < block->length(); i++) {
+        CodeOp* op = &(*block)[i];
+        if (op->alternative()) {
+          if (op->isNext()) {
+            queue.push(std::make_pair(op->alternative(), depth+1));
+          } else {
+            queue.push(std::make_pair(op->alternative(), depth));
+          }
+        }
+        if (op->isLitEnd()) {
+          ASS_EQ(op->getILS()->depth, depth);
+          depth++;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 
 /**
  * Initialize the ClauseMatcher to retrieve generalizetions

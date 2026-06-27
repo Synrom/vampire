@@ -63,7 +63,7 @@ protected:
     using CheckPoint = typename Base::CheckPoint;
 
     void init(CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_,
-	ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_);
+	ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_, bool reachedByNext_=false, Stack<CheckPoint>&& checkpoints_=Stack<CheckPoint>(), unsigned nrNextBins=0);
 
     USE_ALLOCATOR(RemovingLiteralMatcher);
   };
@@ -162,6 +162,7 @@ protected:
 
 template<bool higherOrder>
 class OptimizedClauseCodeTree : public ClauseCodeTree<higherOrder> {
+public:
   using Base = ClauseCodeTree<higherOrder>;
 
   // Types inherited from ClauseCodeTree / CodeTree. Because the base class is
@@ -182,16 +183,34 @@ class OptimizedClauseCodeTree : public ClauseCodeTree<higherOrder> {
   using Base::incorporate;
   using Base::getEntryPoint;
   using Base::compressCheckOps;
+  using Base::visitAllOps;
   using Base::incTimeStamp;
   using Base::removeOneOfAlternatives;
+  using Base::getEntryBlock;
+  using Base::_clauseCodeTree;
   using Base::buildBlock;
   using Base::_curTimeStamp;
   using Base::isEmpty;
   using Base::_entryPoint;
 
-public:
   void insert(Clause* cl);
   void remove(Clause* cl);
+  bool removeOneOfAlternatives(CodeOp* op, Clause* cl, Stack<CodeOp*>* firstsInBlocks);
+  void optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp* removedOp);
+
+  class InvariantTester {
+  public:
+    InvariantTester(OptimizedClauseCodeTree<higherOrder>& tree_) : tree(tree_) {}
+    bool checkSuccessAndFailOperationsAreFinal();
+    bool checkAllClausesAppear(std::vector<Clause*> clauses);
+    bool checkNoFailOps();
+    bool checkILSDepths();
+
+  private:
+    OptimizedClauseCodeTree& tree;
+  };
+
+  friend InvariantTester;
 
   struct OptimizedClauseMatcher : public ClauseCodeTree<higherOrder>::ClauseMatcher
   {
@@ -202,6 +221,7 @@ public:
     using Base::lms;
     using Base::sres;
     using Base::query;
+    using Base::reset;
     using Base::sresLiteral;
     using Base::existsCompatibleMatch;
     using Base::sresNoLiteral;
@@ -221,7 +241,6 @@ public:
   };
 
   USE_ALLOCATOR(OptimizedClauseCodeTree);
-
 private:
 
   // Compilation
@@ -235,6 +254,9 @@ private:
       CodeBlock* block;
       CodeOp** reference;
       ILStruct* ils;
+
+      // next op path
+      Stack<unsigned> nextOpIndices;
     };
     Incorporator(Clause* cl, OptimizedClauseCodeTree& t);
     void incorporate();
@@ -253,9 +275,16 @@ private:
       CodeOp* addNextOp(unsigned sharedPrefix, Incorporator& incorporator, bool matchedFull);
       void appendBlock(CodeBlock* nextBlock);
       CodeOp** findInsertionReference();
+      ILStruct* findILS();
+    };
+
+    struct Chain {
+      CodeOp* chainStart;
     };
 
     const unsigned NextOpThreshold = 1;
+    static const unsigned CheckFunOpThreshold=5; //must be greater than 1 or it would cause loops
+    static const unsigned CheckGroundTermOpThreshold=3; //must be greater than 1 or it would cause loops
 
   private:
     void swap(unsigned i1, unsigned i2);
@@ -272,6 +301,7 @@ private:
     bool fullyMatched = false;
     bool partiallyMatched = false;
     Clause *clause;
+    Stack<Chain> chains;
     DArray<Literal*> lits;
     DArray<unsigned> sharedPrefixes;
     DArray<CodeStack> codes;
