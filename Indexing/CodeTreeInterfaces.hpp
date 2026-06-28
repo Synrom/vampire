@@ -15,6 +15,8 @@
 #ifndef __CodeTreeInterfaces__
 #define __CodeTreeInterfaces__
 
+#include <vector>
+
 #include "Forwards.hpp"
 
 #include "TermCodeTree.hpp"
@@ -68,11 +70,14 @@ class CodeTreeSubsumptionIndex
 public:
   CodeTreeSubsumptionIndex(SaturationAlgorithm&) {}
   ClauseCodeTree<higherOrder>* getClauseCodeTree() { return &_ct; }
+  OptimizedClauseCodeTree<higherOrder>* getOptimizedClauseCodeTree() { return &_oct; }
 protected:
   void handleClause(Clause* c, bool adding) override;
 private:
 
   ClauseCodeTree<higherOrder> _ct;
+  OptimizedClauseCodeTree<higherOrder> _oct;
+  std::vector<Clause*> clauses;
 };
 
 };

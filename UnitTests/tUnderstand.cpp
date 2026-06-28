@@ -1234,7 +1234,10 @@ TEST_FUN(ReproduceRemoveDepthOneRealFailure)
   wtree.insert(clause({ p(f2(x2,x2)) }));
   wtree.insert(clause({ ~p(f2(f2(x1,f2(x2,x3)),f2(x2,x1))), ~p(x4), p(f2(x4,x3)) }));
   wtree.insert(clause({ ~p(f2(x2,x1)), ~p(x1), p(x2) }));
-  wtree.insert(clause({ ~p(f2(x1,f2(x2,x3))), ~p(x4), p(f2(x4,x2)), ~p(x1), ~p(x3) }));
+
+  Kernel::Clause* result = clause({ ~p(f2(x1,f2(x2,x3))), ~p(x4), p(f2(x4,x2)), ~p(x1), ~p(x3) });
+  wtree.insert(result);
+
   wtree.insert(clause({ p(f2(f2(x2,x2),x3)), ~p(x3) }));
   wtree.insert(clause({ p(f2(x3,f2(x2,f2(x1,x4)))), ~p(x3), ~p(f2(x1,x2)), ~p(x4) }));
   wtree.insert(clause({ ~p(f2(x1,f2(x1,x2))), p(x2) }));
@@ -1395,4 +1398,101 @@ TEST_FUN(sres_fail)
   Kernel::Clause* matched_clause = m.next(resolvedQueryLit);
   ASS_EQ(resolvedQueryLit, 1);
   ASS_EQ(matched_clause, C1);
+}
+
+TEST_FUN(Reproducer)
+{
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION);
+  OptimizedClauseCodeTree<false> wtree;
+  wtree.insert(clause({p(f2(x1,f2(f2(x2,f2(x3,x1)),f2(x3,x2))))}));
+  wtree.insert(clause({~p(f2(f2(f2(c,f2(d,e)),e),f2(d,c)))}));
+  wtree.insert(clause({p(x1), ~p(x2), ~p(f2(x2,x1))}));
+  wtree.insert(clause({~p(x1), p(f2(f2(x2,f2(x3,x1)),f2(x3,x2)))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,f2(x3,x1))), p(f2(x3,x2))}));
+  wtree.insert(clause({~p(x1), p(f2(x2,f2(x1,f2(x2,x3)))), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x1,x2)), p(f2(f2(x2,f2(x1,x3)),x3))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x4,f2(x2,f2(x1,f2(x4,x3)))))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(f2(x2,f2(x1,x3))), p(x3)}));
+  wtree.insert(clause({~p(x1), ~p(x2), ~p(x3), p(f2(x1,f2(x3,x2)))}));
+  wtree.insert(clause({~p(x1), ~p(x2), ~p(f2(x3,x2)), p(f2(x1,x3))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,f2(x1,x4))))), p(x4), ~p(f2(x3,x2))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x1,x3)))), p(x2), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x1,x2)), p(f2(x2,x3)), ~p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),x3)), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(x1), ~p(x2), p(f2(x2,f2(x3,f2(x4,x1)))), ~p(f2(x4,x3))}));
+
+  Kernel::Clause* result = clause({~p(f2(x1,f2(x2,x3))), ~p(x4), p(f2(x4,x2)), ~p(x1), ~p(x3)});
+  wtree.insert(result);
+
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),f2(x2,x1))), ~p(x4), p(f2(x4,x3))}));
+  wtree.insert(clause({~p(d)}));
+  wtree.insert(clause({~p(x1), ~p(x2), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(x4), p(f2(x3,f2(x2,f2(x4,x1))))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(f2(x3,f2(x2,f2(x4,x1)))), ~p(x5), p(f2(x5,x4))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(f2(x2,f2(x4,x1))), p(f2(x3,x4))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(f2(x3,x4)), p(f2(x2,f2(x4,x1)))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(x3), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(f2(x2,x1)), p(x3)}));
+  wtree.insert(clause({~p(f2(f2(c,f2(d,e)),e))}));
+  wtree.insert(clause({~p(f2(d,c))}));
+  wtree.insert(clause({~p(e)}));
+  wtree.insert(clause({p(f2(x1,x2)), ~p(x3), ~p(x4), ~p(f2(x2,f2(x1,f2(x4,x3))))}));
+  wtree.insert(clause({p(f2(x1,x2)), ~p(f2(x3,f2(x4,x1))), ~p(x2), ~p(f2(x4,x3))}));
+  wtree.insert(clause({p(f2(f2(x1,x2),x3)), ~p(f2(x2,f2(x1,x4))), ~p(x3), ~p(x4)}));
+  wtree.insert(clause({p(f2(f2(x1,f2(x2,f2(x3,x4))),x5)), ~p(x3), ~p(x5), ~p(x4), ~p(f2(x2,x1))}));
+  wtree.insert(clause({p(f2(f2(x1,f2(x2,x3)),x4)), ~p(x2), ~p(x4), ~p(x1), ~p(x3)}));
+  wtree.insert(clause({p(f2(f2(f2(x1,f2(x2,x3)),f2(x2,x1)),x4)), ~p(x3), ~p(x4)}));
+  wtree.insert(clause({p(f2(f2(x1,x2),x3)), ~p(x1), ~p(x2), ~p(x3)}));
+  wtree.insert(clause({p(x1), ~p(x2), ~p(x3), ~p(f2(x1,f2(x3,x2)))}));
+  wtree.insert(clause({p(f2(x1,f2(x2,x2))), ~p(x1)}));
+  wtree.insert(clause({p(x1), ~p(f2(x2,x3)), ~p(x4), ~p(f2(x3,f2(x2,f2(x4,x1))))}));
+  wtree.insert(clause({p(x1), ~p(f2(x2,x3)), ~p(f2(x2,f2(x4,x1))), ~p(x3), ~p(x4)}));
+  wtree.insert(clause({p(x1), ~p(f2(x2,f2(f2(x3,x1),f2(x2,x3))))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,x3)))), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(x1), p(x2), ~p(f2(x3,f2(x3,f2(x1,x2))))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x1)), p(x2)}));
+
+  Kernel::Clause* C1 = clause({~p(x3)});
+  wtree.insert(C1);
+  wtree.remove(C1);
+
+  wtree.insert(clause({p(f2(x2,x2))}));
+  wtree.insert(clause({p(f2(f2(x2,x2),x3)), ~p(x3)}));
+  wtree.insert(clause({~p(x1), p(f2(x2,f2(x2,x1)))}));
+  wtree.insert(clause({~p(f2(x1,f2(x1,x2))), p(x2)}));
+  wtree.insert(clause({~p(x1), p(f2(x1,x2)), ~p(f2(x3,f2(x4,x2))), ~p(f2(x4,x3))}));
+  wtree.insert(clause({~p(x1), p(f2(x1,x2)), ~p(f2(x3,f2(x3,x2)))}));
+  wtree.insert(clause({~p(x1), p(f2(x1,x2)), ~p(x3), ~p(x4), ~p(f2(x3,f2(x4,x2)))}));
+  wtree.insert(clause({~p(f2(x1,x2)), p(f2(x2,f2(x1,x3))), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,x4)))), p(x3), ~p(x4), ~p(f2(x2,x1))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,x3))), p(x2), ~p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),f2(x2,x1))), p(x3)}));
+
+  Kernel::Clause* D = clause({ ~p(x1), p(f2(x1,x2)), ~p(f2(x3,f2(x2,x4))), ~p(x3), ~p(x4)});
+  
+  OptimizedClauseCodeTree<false>::OptimizedClauseMatcher m;
+  m.init(&wtree, D, true);
+  int resolvedQueryLit;
+  Kernel::Clause* matched_clause = m.next(resolvedQueryLit);
+  ASS_EQ(matched_clause, result);
+  ASS_EQ(resolvedQueryLit, -1);
+}
+
+TEST_FUN(CheckCorrectBindingsPropagation)
+{
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION);
+  
+
+  OptimizedClauseCodeTree<false> wtree;
+  Kernel::Clause* result = clause({ ~p(f2(x1,f2(x2,x3))), ~p(x4), ~p(x1), ~p(x3) });
+  wtree.insert(result);
+
+  Kernel::Clause* D = clause({ ~p(x1), p(f2(x1,x2)), ~p(f2(x3,f2(x2,x4))), ~p(x3), ~p(x4)});
+
+  int resolvedQueryLit;
+  OptimizedClauseCodeTree<false>::OptimizedClauseMatcher m;
+  m.init(&wtree, D, true);
+  Kernel::Clause* matched_clause = m.next(resolvedQueryLit);
+  ASS_EQ(matched_clause, result);
+  ASS_EQ(resolvedQueryLit, -1);
 }

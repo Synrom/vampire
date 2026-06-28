@@ -1495,6 +1495,8 @@ void ClauseCodeTree<higherOrder>::LiteralMatcher::recordMatch()
   if(!ils->matchCnt && Base::linfos[Base::curLInfo].opposite) {
     //if we're matching opposite matches, we have already tried all non-opposite ones
     ils->noNonOppositeMatches=true;
+  } else if (ils->noNonOppositeMatches && !Base::linfos[Base::curLInfo].opposite) {
+    ils->noNonOppositeMatches=false;
   }
   ils->addMatch(Base::linfos[Base::curLInfo].liIndex, Base::bindings);
 }

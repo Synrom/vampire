@@ -13,6 +13,8 @@
  *
  */
 
+#include <algorithm>
+
 #include "Indexing/Index.hpp"
 #include "Indexing/ResultSubstitution.hpp"
 #include "Lib/Allocator.hpp"
@@ -177,10 +179,23 @@ void CodeTreeSubsumptionIndex<higherOrder>::handleClause(Clause* cl, bool adding
 
   if(adding) {
     _ct.insert(cl);
+    _oct.insert(cl);
+    clauses.push_back(cl);
+    std::cout << "wtree.insert(clause({" << cl->toReproducerString() << "}));" << std::endl;
   }
   else {
     _ct.remove(cl);
+    _oct.remove(cl);
+    auto it = std::find(clauses.begin(), clauses.end(), cl);
+    ASS(it != clauses.end());
+    clauses.erase(it);
+    std::cout << "wtree.remove(clause({" << cl->toReproducerString() << "}));" << std::endl;
   }
+  typename OptimizedClauseCodeTree<higherOrder>::InvariantTester tester(_oct);
+  ASS(tester.checkSuccessAndFailOperationsAreFinal());
+  ASS(tester.checkAllClausesAppear(clauses));
+  ASS(tester.checkNoFailOps());
+  ASS(tester.checkILSDepths());
 }
 
 template class CodeTreeSubsumptionIndex<false>;

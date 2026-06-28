@@ -416,6 +416,22 @@ void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litSt
     case CodeTree::LIT_END:
       ils = op.getILS();
       out << GREEN << "lit end " << CRESET << "(nextBinCnt=" << ils->nextBinCnt << ", hasSuccessor=" << ils->hasSuccessor << ") binIdx=" << ils->nextBinIdx << " depth=" << ils->depth;
+      out << " globalVarNumbers=[";
+      for (unsigned i=0; i < ils->varCnt; i++) {
+        out << ils->globalVarNumbers[i];
+        if (i != ils->varCnt-1) out << ", ";
+      }
+      out << "], globalVarPermutation=[";
+      for (unsigned i=0; i < ils->varCnt; i++) {
+        out << ils->globalVarPermutation[i];
+        if (i != ils->varCnt-1) out << ", ";
+      }
+      out << "], sortedGlobalVarNumbers=[";
+      for (unsigned i=0; i < ils->varCnt; i++) {
+        out << ils->sortedGlobalVarNumbers[i];
+        if (i != ils->varCnt-1) out << ", ";
+      }
+      out << "]";
       break;
     case CodeTree::CHECK_GROUND_TERM:
       out << YELLOW << "ground " << CRESET << *op.getTargetTerm();
@@ -735,6 +751,7 @@ bool CodeTree::Matcher<removing, checkRange, higherOrder>::prepareLiteral()
       for (unsigned i=0; i < checkpoint.bindings.size(); i++) {
         bindings[i] = checkpoint.bindings[i];
       }
+      boundedSize = checkpoint.bindings.size();
       curLInfo = checkpoint.liIndex; 
       ft = linfos[curLInfo].ft;
       auto bp = checkpoint.btPoint;
