@@ -415,21 +415,11 @@ void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litSt
       break;
     case CodeTree::LIT_END:
       ils = op.getILS();
-      out << GREEN << "lit end " << CRESET << "(nextBinCnt=" << ils->nextBinCnt << ", hasSuccessor=" << ils->hasSuccessor << ") binIdx=" << ils->nextBinIdx << " depth=" << ils->depth;
-      out << " globalVarNumbers=[";
-      for (unsigned i=0; i < ils->varCnt; i++) {
-        out << ils->globalVarNumbers[i];
-        if (i != ils->varCnt-1) out << ", ";
-      }
-      out << "], globalVarPermutation=[";
-      for (unsigned i=0; i < ils->varCnt; i++) {
-        out << ils->globalVarPermutation[i];
-        if (i != ils->varCnt-1) out << ", ";
-      }
-      out << "], sortedGlobalVarNumbers=[";
-      for (unsigned i=0; i < ils->varCnt; i++) {
-        out << ils->sortedGlobalVarNumbers[i];
-        if (i != ils->varCnt-1) out << ", ";
+      out << GREEN << "lit end " << CRESET << "(nextBinCnt=" << ils->nextBinCnt << ", hasSuccessor=" << ils->hasSuccessor << ") depth=" << ils->depth;
+      out << " nextBinIndices=[";
+      for (unsigned i=0;i < ils->nextBinIndices.length(); i++) {
+        out << ils->nextBinIndices[i].index;
+        if (i != ils->nextBinIndices.length() - 1) out << ", ";
       }
       out << "]";
       break;
@@ -685,7 +675,7 @@ void CodeTree::Matcher<removing, checkRange, higherOrder>::init(CodeTree* tree_,
   reachedByNext = reachedByNext_;
   checkpoints = checkpoints_;
   nextBins.ensure(nrNextBins);
-  for (Stack<CheckPoint>& bin: nextBins) {
+  for (Stack<RecordedCheckPoint>& bin: nextBins) {
     bin.reset();
     bin.reserve(linfoCnt);
   }
@@ -862,17 +852,18 @@ inline void CodeTree::Matcher<removing, checkRange, higherOrder>::doNextOp()
     clonedBinding[i] = bindings[i];
   }
   if constexpr (removing) {
-    nextBins[bin].push(CheckPoint{
+    nextBins[bin].push(RecordedCheckPoint(
       curLInfo,
       std::move(clonedBinding),
-      BTPointRemoving {tp, op->alternative(), RemovingBase::firstsInBlocks->size()} 
-    });
+      tp,
+      RemovingBase::firstsInBlocks->size()
+    ));
   } else {
-    nextBins[bin].push(CheckPoint{
+    nextBins[bin].push(RecordedCheckPoint(
       curLInfo,
       std::move(clonedBinding),
-      BTPoint {tp, op->alternative()} 
-    });
+      tp
+    ));
   }
 }
 

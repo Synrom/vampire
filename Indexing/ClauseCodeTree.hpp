@@ -61,6 +61,7 @@ protected:
   {
     using Base = Matcher</*removing*/true,false,higherOrder>;
     using CheckPoint = typename Base::CheckPoint;
+    using RecordedCheckPoint = typename Base::RecordedCheckPoint;
 
     void init(CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_,
 	ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_, bool reachedByNext_=false, Stack<CheckPoint>&& checkpoints_=Stack<CheckPoint>(), unsigned nrNextBins=0);
@@ -82,6 +83,7 @@ protected:
     using Base::finished;
     using Base::execute;
     using CheckPoint = typename Base::CheckPoint;
+    using RecordedCheckPoint = typename Base::RecordedCheckPoint;
 
     void init(CodeTree* tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess, bool reachedByNext_, Stack<CheckPoint>&& checkpoints_, unsigned nrNextBins);
     bool next();
@@ -105,6 +107,7 @@ public:
   struct ClauseMatcher
   {
     using CheckPoint = typename LiteralMatcher::CheckPoint;
+    using RecordedCheckPoint = typename LiteralMatcher::RecordedCheckPoint;
 
     void init(ClauseCodeTree* tree_, Clause* query_, bool sres_);
     void reset();
@@ -170,6 +173,7 @@ public:
   // unqualified lookup, so we re-introduce them here.
   using CodeOp = typename Base::CodeOp;
   using ILStruct = typename Base::ILStruct;
+  using Bin = typename Base::ILStruct::Bin;
   using CodeStack = typename Base::CodeStack;
   using LitCompiler = typename Base::LitCompiler;
   using SearchStruct = typename Base::SearchStruct ;
@@ -205,6 +209,7 @@ public:
     bool checkAllClausesAppear(std::vector<Clause*> clauses);
     bool checkNoFailOps();
     bool checkILSDepths();
+    bool checkNoConsecutiveNextOps();
 
   private:
     OptimizedClauseCodeTree& tree;
@@ -217,6 +222,7 @@ public:
     using Base = typename ClauseCodeTree<higherOrder>::ClauseMatcher;
     using LiteralMatcher = typename ClauseCodeTree<higherOrder>::LiteralMatcher;
     using CheckPoint = typename LiteralMatcher::CheckPoint;
+    using RecordedCheckPoint = typename Base::RecordedCheckPoint;
     using MatchInfo = typename ClauseCodeTree<higherOrder>::MatchInfo;
     using Base::lms;
     using Base::sres;
@@ -246,6 +252,11 @@ private:
   // Compilation
   class Incorporator {
   public:
+    struct NextOpRecord {
+      unsigned index;
+      CodeOp** reference;
+    };
+
     struct EvalSharingEntry {
       CodeOp* entry;
       unsigned distance;
@@ -256,7 +267,7 @@ private:
       ILStruct* ils;
 
       // next op path
-      Stack<unsigned> nextOpIndices;
+      Stack<NextOpRecord> nextOpPath;
     };
     Incorporator(Clause* cl, OptimizedClauseCodeTree& t);
     void incorporate();
@@ -266,20 +277,18 @@ private:
       unsigned litIndex; // index into lits
       unsigned matchedOps;
       Stack<CodeOp*> matchedPath;
+      Stack<NextOpRecord> nextOpPath;
       
       // CodeBlock information
       CodeBlock* block; // this can be before the actual entry
       CodeOp** reference; // reference pointing to this block
       ILStruct* ils;
 
-      CodeOp* addNextOp(unsigned sharedPrefix, Incorporator& incorporator, bool matchedFull);
+      CodeOp* addNextOp(unsigned sharedPrefix, bool& added);
       void appendBlock(CodeBlock* nextBlock);
       CodeOp** findInsertionReference();
       ILStruct* findILS();
-    };
-
-    struct Chain {
-      CodeOp* chainStart;
+      unsigned actualSharedPrefix(unsigned sharedPrefix);
     };
 
     const unsigned NextOpThreshold = 1;
@@ -293,15 +302,14 @@ private:
     void optimizeIntraClausalLiteralOrder();
     unsigned evalSharingBetweenLits(const CodeStack &l1code, const CodeStack &l2code);
     MatchedBlock evalSharing(unsigned litIndex, const Stack<EvalSharingEntry>& startOps, Stack<EvalSharingEntry>& nextEntries);
-    CodeOp* buildBlock(unsigned litIndex, unsigned matchedCnt, ILStruct* prev, bool stop, CodeOp* addedNextOp);
-    void setNextOPArg(CodeOp* nextOp, ILStruct* ils);
+    CodeOp* buildBlock(unsigned litIndex, unsigned matchedCnt, ILStruct* prev, bool stop);
+    void setNextOpArg(CodeOp* nextOp, ILStruct* ils, CodeOp* entry, bool addedNextOp);
     void destroy();
 
     MatchedBlock fullyMatchedBlock, partiallyMatchedBlock;
     bool fullyMatched = false;
     bool partiallyMatched = false;
     Clause *clause;
-    Stack<Chain> chains;
     DArray<Literal*> lits;
     DArray<unsigned> sharedPrefixes;
     DArray<CodeStack> codes;

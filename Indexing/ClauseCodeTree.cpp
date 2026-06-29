@@ -115,7 +115,7 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::optimizeInterClausalLit
   lits.sort(InitialLiteralOrderingComparator());
 
   Stack<EvalSharingEntry> entries;
-  entries.push(EvalSharingEntry{tree.getEntryPoint(), 0, tree.getEntryBlock(), &tree._entryPoint, 0, Stack<unsigned>()});
+  entries.push(EvalSharingEntry{tree.getEntryPoint(), 0, tree.getEntryBlock(), &tree._entryPoint, 0, Stack<NextOpRecord>()});
   for(unsigned startIndex=0;startIndex<clen;startIndex++) {
 //  for(unsigned startIndex=0;startIndex<1;startIndex++) {
 
@@ -280,16 +280,16 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::swap(unsigned i1, unsig
 }
 
 template<bool higherOrder>
-void OptimizedClauseCodeTree<higherOrder>::Incorporator::setNextOPArg(CodeOp* nextOp, ILStruct* ils)
+void OptimizedClauseCodeTree<higherOrder>::Incorporator::setNextOpArg(CodeOp* nextOp, ILStruct* ils, CodeOp* entry, bool addedNextOp)
 {
-  if (ils->nextBinIdx == -1) {
-    if (ils->previous) {
-      ils->nextBinIdx = ils->previous->nextBinCnt++;
-    } else {
-      ils->nextBinIdx = tree.nextBinCnt++;
-    }
+  unsigned nextBinIdx;
+  if (addedNextOp) {
+    nextBinIdx = ils->previous ? ils->previous->nextBinCnt++ : tree.nextBinCnt++; 
+    nextOp->_setArg(nextBinIdx);
+  } else {
+    nextBinIdx = nextOp->_arg();
   }
-  nextOp->_setArg(ils->nextBinIdx);
+  ils->nextBinIndices.push(Bin{nextBinIdx, entry});
 }
 
 template<bool higherOrder>
@@ -321,35 +321,39 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::incorporate()
   // insert the block
   if (!fullyMatched && !partiallyMatched) {
     ASS_EQ(tree._entryPoint, 0);
-    tree._entryPoint = buildBlock(0, 0, 0, false, nullptr);
+    tree._entryPoint = buildBlock(0, 0, 0, false);
     return;
   }
   ASS(partiallyMatched);
 
-  unsigned fullSharedPrefix = fullyMatched ? sharedPrefixes[fullyMatchedBlock.litIndex] : 0;
-  unsigned partialSharedPrefix = partiallyMatchedBlock.litIndex < clen - 1 ? sharedPrefixes[partiallyMatchedBlock.litIndex] : 0;
+  unsigned fullSharedPrefix = fullyMatched ? fullyMatchedBlock.actualSharedPrefix(sharedPrefixes[fullyMatchedBlock.litIndex]) : 0;
+  unsigned partialSharedPrefix = partiallyMatchedBlock.litIndex < clen - 1 ? partiallyMatchedBlock.actualSharedPrefix(sharedPrefixes[partiallyMatchedBlock.litIndex]) : 0;
+  bool addedNextOp;
 
   if (fullyMatched && partiallyMatchedBlock.block == nullptr) {
-    CodeOp* blockOp = buildBlock(partiallyMatchedBlock.litIndex, 0, fullyMatchedBlock.findILS(), false, nullptr);
+    CodeOp* blockOp = buildBlock(partiallyMatchedBlock.litIndex, 0, fullyMatchedBlock.findILS(), false);
     fullyMatchedBlock.appendBlock(CodeTree::firstOpToCodeBlock(blockOp));
   } else if (fullSharedPrefix > max(NextOpThreshold, partiallyMatchedBlock.matchedOps)) {
-    CodeOp* nextOp = fullyMatchedBlock.addNextOp(fullSharedPrefix, *this, true);
-    nextOp->setAlternative(buildBlock(partiallyMatchedBlock.litIndex, fullSharedPrefix, partiallyMatchedBlock.ils, false, nullptr));
-  } else if (partialSharedPrefix > NextOpThreshold && partialSharedPrefix < partiallyMatchedBlock.matchedOps) {
-    CodeOp* nextBlockReference = partiallyMatchedBlock.addNextOp(partialSharedPrefix, *this, false);
+    CodeOp* nextOp = fullyMatchedBlock.addNextOp(fullSharedPrefix, addedNextOp);
+    CodeOp* blockEntry = buildBlock(partiallyMatchedBlock.litIndex, fullSharedPrefix, partiallyMatchedBlock.ils, false);
+    setNextOpArg(nextOp, fullyMatchedBlock.findILS(), blockEntry, addedNextOp);
+  } else if (partialSharedPrefix > NextOpThreshold && partialSharedPrefix < partiallyMatchedBlock.matchedOps && partialSharedPrefix >= fullSharedPrefix) {
+    // TODO: there's a bug somewhere here if partialSharedPrefix == fullSharedPrefix
+    CodeOp* nextOp = partiallyMatchedBlock.addNextOp(partialSharedPrefix, addedNextOp);
     CodeOp** reference = partiallyMatchedBlock.findInsertionReference();
-    *reference = buildBlock(partiallyMatchedBlock.litIndex, partiallyMatchedBlock.matchedOps, partiallyMatchedBlock.ils, true, nextBlockReference);
+    *reference = buildBlock(partiallyMatchedBlock.litIndex, partiallyMatchedBlock.matchedOps, partiallyMatchedBlock.ils, true);
     CodeBlock* block = CodeTree::firstOpToCodeBlock(*reference);
     CodeOp* lastBlockOp = &(*block)[block->length() - 1];
     ASS(lastBlockOp->isLitEnd());
-    nextBlockReference->setAlternative(buildBlock(partiallyMatchedBlock.litIndex+1, partialSharedPrefix, lastBlockOp->getILS(), false, nullptr));
+    CodeOp* blockEntry = buildBlock(partiallyMatchedBlock.litIndex+1, partialSharedPrefix, lastBlockOp->getILS(), false);
+    setNextOpArg(nextOp, lastBlockOp->getILS(), blockEntry, addedNextOp);
   } else {
     CodeOp** reference = partiallyMatchedBlock.findInsertionReference();
     if (reference == nullptr) {
-      CodeOp* blockOp = buildBlock(partiallyMatchedBlock.litIndex, partiallyMatchedBlock.matchedOps, partiallyMatchedBlock.ils, false, nullptr);
+      CodeOp* blockOp = buildBlock(partiallyMatchedBlock.litIndex, partiallyMatchedBlock.matchedOps, partiallyMatchedBlock.ils, false);
       partiallyMatchedBlock.appendBlock(CodeTree::firstOpToCodeBlock(blockOp));
     } else {
-      *reference = buildBlock(partiallyMatchedBlock.litIndex, partiallyMatchedBlock.matchedOps, partiallyMatchedBlock.ils, false, nullptr);
+      *reference = buildBlock(partiallyMatchedBlock.litIndex, partiallyMatchedBlock.matchedOps, partiallyMatchedBlock.ils, false);
     }
   }
 
@@ -364,9 +368,11 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::appendBlo
   CodeBlock* lastBlock = block;
   unsigned pathIdx = &(*lastBlock)[0] == matchedPath[0] ? 1 : 0;
   CodeOp* treeOp = &(*lastBlock)[0];
+  unsigned nextOpPathIdx = 0;
 
   while (pathIdx < matchedPath.length()) {
     for (;;) {
+      if (pathIdx >= matchedPath.length()) break;
       if (matchedPath[pathIdx] == treeOp) {
         pathIdx++;
         if (pathIdx >= matchedPath.length()) break;
@@ -393,6 +399,17 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::appendBlo
         continue;
       }
       if (treeOp->isNext()) {
+        if (nextOpPathIdx < nextOpPath.length() && treeOp->_arg() == nextOpPath[nextOpPathIdx].index) {
+          ASS(pathIdx < matchedPath.length());
+          NextOpRecord nextEntry = nextOpPath[nextOpPathIdx];
+          ASS_EQ(matchedPath[pathIdx], *nextEntry.reference);
+          treeOp = *nextEntry.reference;
+          lastBlock = CodeTree::firstOpToCodeBlock(treeOp);
+          referenceLastBlock = nextEntry.reference;
+          pathIdx++;
+          nextOpPathIdx++;
+          continue;
+        }
         treeOp++;
         continue;
       }
@@ -434,25 +451,24 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::appendBlo
 }
 
 template<bool higherOrder>
-typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::addNextOp(unsigned sharedPrefix, Incorporator& incorporator, bool matchedFull)
+unsigned OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::actualSharedPrefix(unsigned sharedPrefix)
 {
+  if (block == nullptr) {
+    return sharedPrefix;
+  }
   ASS(matchedPath.length() > 0);
 
   CodeOp* treeOp = matchedPath[0];
   unsigned pathIdx = 1;
+  unsigned nextOpPathIdx = 0;
 
-  CodeBlock* currentBlock = block;
-  CodeOp** currentReference = reference;
-  CodeOp* insertAfterThisOp = nullptr;
-  ILStruct* ils = nullptr;
+  if (nextOpPath.length() == 0) {
+    return sharedPrefix;
+  }
 
-  for (unsigned int i=0;i < max(sharedPrefix, matchedOps); i++) {
+  for (unsigned int i=0;i < sharedPrefix+1; i++) {
     for (;;) {
       if (pathIdx < matchedPath.length() && matchedPath[pathIdx] == treeOp->alternative()) {
-        if (i < sharedPrefix) {
-          currentBlock = CodeTree::firstOpToCodeBlock(treeOp->alternative());
-          currentReference = &treeOp->alternative();
-        }
         treeOp = treeOp->alternative();
         pathIdx++;
         continue;
@@ -463,47 +479,114 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<h
         if (ss->template getTargetOpPtr<false>(*matchedPath[pathIdx], toPtr) && *toPtr) {
           ASS_EQ(*toPtr, matchedPath[pathIdx]);
           treeOp = matchedPath[pathIdx];
-          if (i < sharedPrefix) {
-            currentBlock = CodeTree::firstOpToCodeBlock(matchedPath[pathIdx]);
-            currentReference = toPtr;
-          }
           pathIdx++;
         }
         continue;
       }
       if (treeOp->isNext()) {
-        treeOp++;
-        continue;
+        if (nextOpPathIdx < nextOpPath.length() && treeOp->_arg() == nextOpPath[nextOpPathIdx].index) {
+          ASS(pathIdx < matchedPath.length());
+          NextOpRecord nextEntry = nextOpPath[nextOpPathIdx];
+          ASS_EQ(matchedPath[pathIdx], *nextEntry.reference);
+          treeOp = *nextEntry.reference;
+          pathIdx++;
+          nextOpPathIdx++;
+          continue;
+        }
+        if (i  < sharedPrefix) {
+          treeOp++;
+          continue;
+        }
       }
       break;
     }
     ASS(!treeOp->isSearchStruct());
-    if (i == sharedPrefix - 1) {
-      insertAfterThisOp = treeOp;
-    }
-    if (matchedFull) {
-      if (treeOp->isLitEnd()) {
-        ils = treeOp->getILS();
+    treeOp++;
+  }
+  if (nextOpPathIdx == nextOpPath.length()) {
+    return sharedPrefix;
+  }
+  return 0;
+}
+
+template<bool higherOrder>
+typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::addNextOp(unsigned sharedPrefix, bool& added)
+{
+  ASS(matchedPath.length() > 0);
+
+  CodeOp* treeOp = matchedPath[0];
+  unsigned pathIdx = 1;
+  unsigned nextOpPathIdx = 0;
+
+  CodeBlock* currentBlock = block;
+  CodeOp** currentReference = reference;
+  CodeOp* insertBeforeThisOp = nullptr;
+
+  for (unsigned int i=0;i < sharedPrefix+1; i++) {
+    for (;;) {
+      if (pathIdx < matchedPath.length() && matchedPath[pathIdx] == treeOp->alternative()) {
+        currentBlock = CodeTree::firstOpToCodeBlock(treeOp->alternative());
+        currentReference = &treeOp->alternative();
+        treeOp = treeOp->alternative();
+        pathIdx++;
+        continue;
       }
-    } else {
-      if (i >= sharedPrefix-1) break;
+      if (treeOp->isSearchStruct()) {
+        SearchStruct* ss = treeOp->getSearchStruct();
+        CodeOp** toPtr;
+        if (ss->template getTargetOpPtr<false>(*matchedPath[pathIdx], toPtr) && *toPtr) {
+          ASS_EQ(*toPtr, matchedPath[pathIdx]);
+          treeOp = matchedPath[pathIdx];
+          currentBlock = CodeTree::firstOpToCodeBlock(matchedPath[pathIdx]);
+          currentReference = toPtr;
+          pathIdx++;
+        }
+        continue;
+      }
+      if (treeOp->isNext()) {
+        if (nextOpPathIdx < nextOpPath.length() && treeOp->_arg() == nextOpPath[nextOpPathIdx].index) {
+          ASS(pathIdx < matchedPath.length());
+          NextOpRecord nextEntry = nextOpPath[nextOpPathIdx];
+          ASS_EQ(matchedPath[pathIdx], *nextEntry.reference);
+          treeOp = *nextEntry.reference;
+          currentBlock = CodeTree::firstOpToCodeBlock(treeOp);
+          currentReference = nextEntry.reference;
+          pathIdx++;
+          nextOpPathIdx++;
+          continue;
+        }
+        if (i  < sharedPrefix) {
+          treeOp++;
+          continue;
+        }
+      }
+      break;
+    }
+    ASS(!treeOp->isSearchStruct());
+    if (i == sharedPrefix) {
+      insertBeforeThisOp = treeOp;
     }
     treeOp++;
   }
+  ASS(insertBeforeThisOp);
+  if (insertBeforeThisOp->isNext()) {
+    added = false;
+    return insertBeforeThisOp;
+  }
 
+  added = true;
   CodeOp* nextOpReference;
   CodeBlock* newBlock = CodeBlock::allocate(currentBlock->length() + 1);
-  matchedPath[pathIdx-1] = &(*newBlock)[0];
+  unsigned offset = matchedPath[pathIdx-1] - &(*currentBlock)[0];
+  matchedPath[pathIdx-1] = &(*newBlock)[0] + offset;
 
   for (unsigned i=0, j=0;i < currentBlock->length(); i++, j++) {
-    (*newBlock)[j] = (*currentBlock)[i];
-    if (&(*currentBlock)[i] == insertAfterThisOp) {
-      (*newBlock)[++j] = CodeOp::getNext(0);
+    if (&(*currentBlock)[i] == insertBeforeThisOp) {
+      (*newBlock)[j] = CodeOp::getNext(0);
       nextOpReference = &(*newBlock)[j];
-      if (ils) {
-        incorporator.setNextOPArg(nextOpReference, ils);
-      }
+      j++;
     }
+    (*newBlock)[j] = (*currentBlock)[i];
   }
   currentBlock->deallocate();
   *currentReference = &(*newBlock)[0];
@@ -519,6 +602,7 @@ typename OptimizedClauseCodeTree<higherOrder>::ILStruct* OptimizedClauseCodeTree
 
   CodeOp* treeOp = matchedPath[0];
   unsigned pathIdx = 1;
+  unsigned nextOpPathIdx = 0;
   for (unsigned int i=0;i < matchedOps-1; i++) {
     for (;;) {
       if (pathIdx < matchedPath.length() && matchedPath[pathIdx] == treeOp->alternative()) {
@@ -537,6 +621,15 @@ typename OptimizedClauseCodeTree<higherOrder>::ILStruct* OptimizedClauseCodeTree
         continue;
       }
       if (treeOp->isNext()) {
+        if (nextOpPathIdx < nextOpPath.length() && treeOp->_arg() == nextOpPath[nextOpPathIdx].index) {
+          ASS(pathIdx < matchedPath.length());
+          NextOpRecord nextEntry = nextOpPath[nextOpPathIdx];
+          ASS_EQ(matchedPath[pathIdx], *nextEntry.reference);
+          treeOp = *nextEntry.reference;
+          pathIdx++;
+          nextOpPathIdx++;
+          continue;
+        }
         treeOp++;
         continue;
       }
@@ -565,6 +658,15 @@ typename OptimizedClauseCodeTree<higherOrder>::ILStruct* OptimizedClauseCodeTree
       continue;
     }
     if (treeOp->isNext()) {
+      if (nextOpPathIdx < nextOpPath.length() && treeOp->_arg() == nextOpPath[nextOpPathIdx].index) {
+        ASS(pathIdx < matchedPath.length());
+        NextOpRecord nextEntry = nextOpPath[nextOpPathIdx];
+        ASS_EQ(matchedPath[pathIdx], *nextEntry.reference);
+        treeOp = *nextEntry.reference;
+        pathIdx++;
+        nextOpPathIdx++;
+        continue;
+      }
       treeOp++;
       continue;
     }
@@ -581,6 +683,7 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp** OptimizedClauseCodeTree<
 
   CodeOp* treeOp = matchedPath[0];
   unsigned pathIdx = 1;
+  unsigned nextOpPathIdx = 0;
 
   for (unsigned int i=0;i < matchedOps; i++) {
     for (;;) {
@@ -600,6 +703,15 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp** OptimizedClauseCodeTree<
         continue;
       }
       if (treeOp->isNext()) {
+        if (nextOpPathIdx < nextOpPath.length() && treeOp->_arg() == nextOpPath[nextOpPathIdx].index) {
+          ASS(pathIdx < matchedPath.length());
+          NextOpRecord nextEntry = nextOpPath[nextOpPathIdx];
+          ASS_EQ(matchedPath[pathIdx], *nextEntry.reference);
+          treeOp = *nextEntry.reference;
+          pathIdx++;
+          nextOpPathIdx++;
+          continue;
+        }
         treeOp++;
         continue;
       }
@@ -628,6 +740,15 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp** OptimizedClauseCodeTree<
       continue;
     }
     if (treeOp->isNext()) {
+      if (nextOpPathIdx < nextOpPath.length() && treeOp->_arg() == nextOpPath[nextOpPathIdx].index) {
+        ASS(pathIdx < matchedPath.length());
+        NextOpRecord nextEntry = nextOpPath[nextOpPathIdx];
+        ASS_EQ(matchedPath[pathIdx], *nextEntry.reference);
+        treeOp = *nextEntry.reference;
+        pathIdx++;
+        nextOpPathIdx++;
+        continue;
+      }
       treeOp++;
       continue;
     }
@@ -637,7 +758,7 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp** OptimizedClauseCodeTree<
 }
 
 template<bool higherOrder>
-typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<higherOrder>::Incorporator::buildBlock(unsigned litIndex, unsigned matchedCnt, ILStruct* prev, bool stop, CodeOp* addedNextOp)
+typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<higherOrder>::Incorporator::buildBlock(unsigned litIndex, unsigned matchedCnt, ILStruct* prev, bool stop)
 {
   CodeStack code = codes[litIndex];
   /*
@@ -662,17 +783,17 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<h
       cnt -= matchedCnt;
     }
   }
-  bool firstLit = true;
   CodeBlock* res = CodeBlock::allocate(cnt);
   unsigned codeIdx = 0;
   unsigned firstLitIndex = litIndex;
   while (litIndex < endIdx) {
     CodeStack code = codes[litIndex];
+    bool first = firstLitIndex == litIndex;
     if (litIndex < clen - 1 && sharedPrefixes[litIndex] > NextOpThreshold && (litIndex > firstLitIndex || sharedPrefixes[litIndex] >= matchedCnt)) {
       CodeOp* nextOpReference = nullptr;
       ILStruct* ils = nullptr;
-      unsigned sOfs = matchedCnt;
-      unsigned nrOps = code.length() - matchedCnt + 1;
+      unsigned sOfs = first ? matchedCnt : 0;
+      unsigned nrOps = first ? code.length() - matchedCnt + 1 : code.length() + 1;
       for (unsigned i=codeIdx, j=sOfs; i < codeIdx + nrOps && j < code.length(); i++, j++) {
         if (j == sharedPrefixes[litIndex]) {
           (*res)[i] = CodeOp::getNext(0);
@@ -683,12 +804,6 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<h
           ils = code[j].getILS();
           ils->putIntoSequence(prev);
           ils->hasSuccessor = false;
-          if (nextOpReference && firstLit) {
-            firstLit = false;
-            ASS(ils);
-            ASS(nextOpReference);
-            setNextOPArg(nextOpReference, ils);
-          }
           prev = ils;
         }
         ASS(i < cnt);
@@ -696,20 +811,17 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp* OptimizedClauseCodeTree<h
       }
       ASS(nextOpReference);
       ASS(ils);
-      nextOpReference->setAlternative(buildBlock(litIndex+1, sharedPrefixes[litIndex], ils, false, nullptr));
+      CodeOp* nextEntry = buildBlock(litIndex+1, sharedPrefixes[litIndex], ils, false);
+      setNextOpArg(nextOpReference, ils, nextEntry, true);
       break;
     } else {
-      unsigned nrOps = code.length() - matchedCnt;
+      unsigned nrOps = first ? code.length() - matchedCnt : code.length();
       ILStruct* ils = nullptr;
-      for (unsigned i=codeIdx,j = matchedCnt; i < codeIdx + nrOps; i++, j++) {
+      for (unsigned i=codeIdx,j = first ? matchedCnt : 0; i < codeIdx + nrOps; i++, j++) {
         if (code[j].isLitEnd()) {
           code[j].getILS()->putIntoSequence(prev);
           ils = code[j].getILS();
           ils->hasSuccessor = !stop;
-          if (addedNextOp && firstLit) {
-            firstLit = false;
-            setNextOPArg(addedNextOp, ils);
-          }
           prev = ils;
         }
         ASS(i < cnt);
@@ -777,7 +889,7 @@ typename OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock Optimi
     ILStruct* ils;
   };
 
-  MatchedBlock result = MatchedBlock{true, litIndex, 0, Stack<CodeOp*>(), nullptr, nullptr, nullptr};
+  MatchedBlock result = MatchedBlock{true, litIndex, 0, Stack<CodeOp*>(), Stack<NextOpRecord>(), nullptr, nullptr, nullptr};
   ILStruct* thisILS  = nullptr;
 
   for (EvalSharingEntry entry : startOps) {
@@ -823,28 +935,24 @@ typename OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock Optimi
           ASS_NEQ(treeOp, treeOp->alternative());
           if (treeOp->isNext()) {
             if (state.distance == necessaryDistance) {
-              Stack<unsigned> nextOpIndices;
-              for (CodeOp* branch : state.path) {
-                if (branch->isNext()) {
-                  nextOpIndices.push(branch->_arg());
-                }
-              }
-              nextOpIndices.push(treeOp->_arg());
+              Stack<NextOpRecord> nextOpPath = entry.nextOpPath;
+              nextOpPath.push(NextOpRecord{treeOp->_arg(), 0});
               bool alreadyExists = false;
               for (EvalSharingEntry nextEntry : nextEntries) {
-                if (nextEntry.entry == entryOp && nextOpIndices.top() == nextEntry.nextOpIndices.top()) {
+                if (nextEntry.entry == entryOp && nextOpPath.top().index== nextEntry.nextOpPath.top().index) {
                   alreadyExists = true;
                   break;
                 }
               }
               if (!alreadyExists) {
-                nextEntries.push(EvalSharingEntry{entryOp, necessaryDistance+1, entry.block, entry.reference, entry.ils, nextOpIndices});
+                nextEntries.push(EvalSharingEntry{entryOp, necessaryDistance+1, entry.block, entry.reference, entry.ils, nextOpPath});
               }
-            } else if (state.nextBinPathIdx < entry.nextOpIndices.length() && entry.nextOpIndices[state.nextBinPathIdx] == treeOp->_arg()) {
+            } else if (state.nextBinPathIdx < entry.nextOpPath.length() && entry.nextOpPath[state.nextBinPathIdx].index == treeOp->_arg()) {
               ASS(state.distance < necessaryDistance);
               Stack<CodeOp*> newPath = state.path;
-              newPath.push(treeOp->alternative());
-              queue.push(MatchingState{treeOp->alternative(), i, state.distance+1, newPath, state.nextBinPathIdx+1, CodeTree::firstOpToCodeBlock(treeOp->alternative()), &treeOp->alternative(), currentIls}); 
+              CodeOp* newEntry = *entry.nextOpPath[state.nextBinPathIdx].reference;
+              newPath.push(newEntry);
+              queue.push(MatchingState{newEntry, i, state.distance+1, newPath, state.nextBinPathIdx+1, CodeTree::firstOpToCodeBlock(newEntry), entry.nextOpPath[state.nextBinPathIdx].reference, currentIls}); 
             }
             treeOp++;
             continue;
@@ -893,6 +1001,7 @@ typename OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock Optimi
                   litIndex,
                   i,
                   state.path,
+                  entry.nextOpPath,
                   entry.block,
                   entry.reference,
                   entry.ils
@@ -923,19 +1032,26 @@ typename OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock Optimi
       thisILS = treeOp->getILS();
       thisILS->refCount++;
       for (unsigned i=nextEntries.length()-1; i >= 0 && nextEntries.length() > 0; i--) {
-        if (nextEntries[i].nextOpIndices.top() != thisILS->nextBinIdx) {
-          nextEntries.swapRemove(i);
-        } else {
-          nextEntries[i].ils = thisILS;
+        bool remove = true;
+        for (Bin &bin: thisILS->nextBinIndices) {
+          if (nextEntries[i].nextOpPath.top().index == bin.index) {
+            nextEntries[i].nextOpPath.top().reference = &bin.entry;
+            nextEntries[i].ils = thisILS;
+            remove = false;
+            break;
+          }
         }
+        if (remove) {
+          nextEntries.swapRemove(i);
+        } 
         if (i==0) break;
       }
       if (treeOp->getILS()->hasSuccessor) {
-        nextEntries.push(EvalSharingEntry({treeOp+1, 0, currentBlock, currentReference, treeOp->getILS(), Stack<unsigned>()}));
+        nextEntries.push(EvalSharingEntry({treeOp+1, 0, currentBlock, currentReference, treeOp->getILS(), Stack<NextOpRecord>()}));
       }
 
       return MatchedBlock {
-        i < clen, litIndex, i, state.path, entry.block, entry.reference, entry.ils
+        i < clen, litIndex, i, state.path, entry.nextOpPath, entry.block, entry.reference, entry.ils
       };
 entryDone:
       ;
@@ -1597,6 +1713,11 @@ bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkSuccessAndFailO
         if (op->alternative()) {
           queue.push(op->alternative());
         }
+        if (op->isLitEnd()) {
+          for (Bin &bin: op->getILS()->nextBinIndices) {
+            queue.push(bin.entry);
+          }
+        }
         if (op->isSuccess() || op->isFail()) {
           if (i != block->length() - 1) {
             std::cout << "Tree has SUCESS or FAIL ops that are not final:" << std::endl << tree << std::endl;
@@ -1639,6 +1760,11 @@ bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkAllClausesAppea
         if (op->alternative()) {
           queue.push(op->alternative());
         }
+        if (op->isLitEnd()) {
+          for (Bin &bin: op->getILS()->nextBinIndices) {
+            queue.push(bin.entry);
+          }
+        }
       }
     }
   }
@@ -1663,6 +1789,47 @@ bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkNoFailOps()
   return check;
 }
 
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkNoConsecutiveNextOps()
+{
+  Stack<CodeOp*> queue;
+  queue.push(tree._entryPoint);
+  while (queue.isNonEmpty()) {
+    CodeOp* blockOp = queue.pop();
+    if (blockOp->isSearchStruct()) {
+      auto ss = blockOp->getSearchStruct();
+      for (unsigned i=0; i < ss->length(); i++) {
+        if (ss->targets[i]) {
+          queue.push(ss->targets[i]);
+        }
+      }
+    } else {
+      CodeBlock* block = CodeTree::firstOpToCodeBlock(blockOp);
+      bool lastOpWasNextOp = false;
+      for (unsigned i=0;i < block->length(); i++) {
+        CodeOp* op = &(*block)[i];
+        if (op->isNext()) {
+          if (lastOpWasNextOp) {
+            std::cout << "Tree has consecutive next ops:" << std::endl << tree << std::endl;
+          }
+          ASS(!lastOpWasNextOp);
+          lastOpWasNextOp = true;
+        } else {
+          lastOpWasNextOp = false;
+        }
+        if (op->alternative()) {
+          queue.push(op->alternative());
+        }
+        if (op->isLitEnd()) {
+          for (Bin &bin : op->getILS()->nextBinIndices) {
+            queue.push(bin.entry);
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
 
 template<bool higherOrder>
 bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkILSDepths()
@@ -1684,15 +1851,14 @@ bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkILSDepths()
       for (unsigned i=0; i < block->length(); i++) {
         CodeOp* op = &(*block)[i];
         if (op->alternative()) {
-          if (op->isNext()) {
-            queue.push(std::make_pair(op->alternative(), depth+1));
-          } else {
-            queue.push(std::make_pair(op->alternative(), depth));
-          }
+          queue.push(std::make_pair(op->alternative(), depth));
         }
         if (op->isLitEnd()) {
           ASS_EQ(op->getILS()->depth, depth);
           depth++;
+          for (Bin &bin: op->getILS()->nextBinIndices) {
+            queue.push(std::make_pair(bin.entry, depth));
+          }
         }
       }
     }
@@ -1794,6 +1960,7 @@ void ClauseCodeTree<higherOrder>::ClauseMatcher::reset()
 template<bool higherOrder>
 Clause* ClauseCodeTree<higherOrder>::ClauseMatcher::next(int& resolvedQueryLit)
 {
+  TIME_TRACE("Normal Clause Matcher next")
   if(lms.isEmpty()) {
     return 0;
   }
@@ -1849,6 +2016,7 @@ Clause* ClauseCodeTree<higherOrder>::ClauseMatcher::next(int& resolvedQueryLit)
 template<bool higherOrder>
 Clause* OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::next(int& resolvedQueryLit)
 {
+  TIME_TRACE("Optimized Clause Matcher next")
   if(lms.isEmpty()) {
     return 0;
   }
@@ -1892,8 +2060,12 @@ Clause* OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::next(int& 
       }
 
       bool seekOnlySuccess=lms.size()==query->length();
-      ASS(ils->nextBinIdx == -1 || ils->nextBinIdx < lms.top()->nextBins.size());
-      Stack<CheckPoint> checkpoints = ils->reachedByNextOp() ? std::move(lms.top()->nextBins[ils->nextBinIdx]) : Stack<CheckPoint>();
+      Stack<CheckPoint> checkpoints;
+      for (Bin &bin: ils->nextBinIndices) {
+        for (RecordedCheckPoint cp : lms.top()->nextBins[bin.index]) {
+          checkpoints.push(cp.toCheckpoint(bin.entry));
+        }
+      }
       enterLiteral(newLitEntry, seekOnlySuccess, ils->nextBinCnt, ils->reachedByNextOp(), std::move(checkpoints));
     }
   }
@@ -1954,10 +2126,14 @@ inline bool OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::canEnt
     return false;
   }
   if (ils->reachedByNextOp() && !op->hasSuccessor()) {
-    ASS(lms.top()->nextBins.size() > ils->nextBinIdx);
-    if (lms.top()->nextBins[ils->nextBinIdx].length() == 0)  {
-      return false;
+    bool empty = true;
+    for (Bin bin: ils->nextBinIndices) {
+      if (lms.top()->nextBins[bin.index].isNonEmpty()) {
+        empty = false;
+        break;
+      }
     }
+    if (empty) return false;
   }
 
   //we have already matched and entered some index literals, so we

@@ -64,6 +64,8 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
   std::vector<bool> consumed(clauseMatcherResults.size(), false);
   std::vector<std::pair<Clause*, int>> optimizedClauseMatcherResults;
 
+  std::cout << "Run on " << cl->toReproducerString() << std::endl;
+
   while ((premise = ocm.next(resolvedQueryLit))) {
     optimizedClauseMatcherResults.emplace_back(premise, resolvedQueryLit);
     const auto optimizedResult = optimizedClauseMatcherResults.back();

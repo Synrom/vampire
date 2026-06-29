@@ -123,8 +123,12 @@ public:
 
     unsigned nextBinCnt=0;
     bool hasSuccessor=false;
-    int nextBinIdx=-1;
-    inline bool reachedByNextOp() const { return nextBinIdx != -1; }
+    struct Bin {
+      unsigned index;
+      CodeOp* entry;
+    };
+    Stack<Bin> nextBinIndices;
+    inline bool reachedByNextOp() const { return nextBinIndices.isNonEmpty(); }
     unsigned refCount=1;
 
     unsigned* globalVarNumbers;
@@ -319,6 +323,7 @@ public:
   typedef Stack<CodeOp> CodeStack;
   typedef DArray<TermList> BindingArray;
 
+
   // This holds the parts relevant only for Matcher<true,...>
   struct RemovingBase {
     Stack<CodeOp*>* firstsInBlocks;
@@ -328,6 +333,12 @@ public:
   };
 
   struct NonRemovingBase {};
+
+  struct FibDepthField {};
+
+  struct FibDepthFieldRemoving {
+    size_t fibDepth;
+  };
 
   /**
    * Context for finding matches of literals
@@ -378,6 +389,38 @@ public:
       std::conditional_t<removing,BTPointRemoving,BTPoint> btPoint;
     };   
 
+    struct RecordedCheckPoint
+      : std::conditional_t<removing, FibDepthFieldRemoving, FibDepthField>
+    {
+      size_t liIndex;
+      BindingArray bindings;
+      size_t tp;
+
+      RecordedCheckPoint(size_t liIndex_, BindingArray&& bindings_, size_t tp_, size_t fibDepth_=0)
+        : liIndex(liIndex_), bindings(bindings_), tp(tp_) 
+        {
+          if constexpr (removing) {
+            FibDepthFieldRemoving::fibDepth = fibDepth_;
+          }
+        }
+
+      inline CheckPoint toCheckpoint(CodeOp *op) {
+        if constexpr (removing) {
+          return CheckPoint{
+            liIndex,
+            bindings.clone(),
+            BTPointRemoving{tp, op, FibDepthFieldRemoving::fibDepth}
+          };
+        } else {
+          return CheckPoint {
+            liIndex,
+            bindings.clone(),
+            BTPoint{tp, op}
+          };
+        }
+      }
+    };   
+
     inline bool finished() const { return !fresh && !_matched; }
     inline bool matched() const { return _matched && op->isLitEnd(); }
     inline bool success() const { return _matched && op->isSuccess(); }
@@ -394,7 +437,7 @@ public:
 
     BindingArray bindings;
 
-    DArray<Stack<CheckPoint>> nextBins;
+    DArray<Stack<RecordedCheckPoint>> nextBins;
     Stack<CheckPoint> checkpoints;
     bool reachedByNext = false;
     bool executingNormally = false;
@@ -511,6 +554,11 @@ public:
           visitor(op, depth+(cb->length()-rem), litStart);
           if(op->alternative()) {
             top_ops.emplace(op->alternative(),depth+(cb->length()-rem),litStart);
+          }
+          if (op->isLitEnd()) {
+            for (ILStruct::Bin& bin: op->getILS()->nextBinIndices) {
+              top_ops.emplace(bin.entry, depth + (cb->length()-rem) + 1, false);
+            }
           }
           litStart = op->isLitEnd();
         }

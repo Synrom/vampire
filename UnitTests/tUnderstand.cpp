@@ -86,6 +86,7 @@ void checkOptimization(std::vector<Kernel::Clause*> clauses, Kernel::Clause* que
   ASS(tester.checkAllClausesAppear(clauses));
   ASS(tester.checkNoFailOps());
   ASS(tester.checkILSDepths());
+  ASS(tester.checkNoConsecutiveNextOps());
 
 
   OptimizedClauseCodeTree<false>::OptimizedClauseMatcher m;
@@ -240,6 +241,24 @@ TEST_FUN(CheckCorrectBins2)
   checkOptimization(clauses, nullptr, false);
 }
 
+TEST_FUN(CheckCorrectBins5)
+{
+  // C1 = {p2(c,c)}, C2 = {p2(c,d), p2(c,e)}
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION)
+  OptimizedClauseCodeTree<false> wtree;
+  Kernel::Clause *C1 = clause({p3(c,c,c), p3(c,c,d)});
+  Kernel::Clause *C2 = clause({p3(c,c,c), p3(c,c,d), p3(c,d,d)});
+  wtree.insert(C1);
+  std::cout << wtree << std::endl;
+  wtree.insert(C2);
+  std::cout << wtree << std::endl;
+
+  std::vector<Kernel::Clause*> clauses;
+  clauses.push_back(clause({p3(c,c,c), p3(c,c,d)}));
+  clauses.push_back(clause({p3(c,c,c), p3(c,c,d), p3(c,d,d)}));
+  checkOptimization(clauses, nullptr, false);
+}
+
 TEST_FUN(CheckCorrectBins4)
 {
   // C1 = {p2(c,c)}, C2 = {p2(c,d), p2(c,e)}
@@ -274,6 +293,15 @@ TEST_FUN(InsertLongerPrefixOverlap)
 {
   // C1 = { p(c,d,e), p(c,e,e) }, C2 = { p(c,d,e), p(c,d,e2) }
   __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION)
+  Kernel::Clause* C1 = clause({ p3(c,d,e), p3(c,e,e) });
+  Kernel::Clause* C2 = clause({ p3(c,d,e), p3(c,d,e2) });
+  OptimizedClauseCodeTree<false> tree;
+  tree.insert(C1);
+  std::cout << tree << std::endl;
+
+  tree.insert(C2);
+  std::cout << tree << std::endl;
+
   std::vector<Kernel::Clause*> clauses;
   clauses.push_back(clause({ p3(c,d,e), p3(c,e,e) }));
   clauses.push_back(clause({ p3(c,d,e), p3(c,d,e2) }));
@@ -284,6 +312,7 @@ TEST_FUN(TwoSameNextOps)
 {
   // C1 = { p(c,d), p(c,e) }, C2 = { p(c,d), p(c,e2) }
   __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION)
+  OptimizedClauseCodeTree<false> tree;
   std::vector<Kernel::Clause*> clauses;
   clauses.push_back(clause({ p2(c,d), p2(c,e) }));
   clauses.push_back(clause({ p2(c,d), p2(c,e2) }));
@@ -342,6 +371,14 @@ TEST_FUN(LaterLenghtOverlaps)
   __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION)
   // first clause is two literals long that are non overlapping. Second clause is three literals long with the first two being the same and the third overlapping
   std::vector<Kernel::Clause*> clauses;
+  Kernel::Clause *C1 = clause({p2(c,c), p2(d,d) });
+  Kernel::Clause *C2 = clause({p2(c,c), p2(d,d), p2(d,c) });
+  OptimizedClauseCodeTree<false> tree;
+  tree.insert(C1);
+  std::cout << tree << std::endl;
+  tree.insert(C2);
+  std::cout << tree << std::endl;
+
   clauses.push_back(clause({p2(c,c), p2(d,d) }));
   clauses.push_back(clause({p2(c,c), p2(d,d), p2(d,c) }));
   checkOptimization(clauses, nullptr, false);
@@ -388,6 +425,7 @@ bool checkSubsumption(Kernel::Clause *l, Kernel::Clause *m, bool verbose)
   ASS(tester.checkAllClausesAppear(clauses));
   ASS(tester.checkNoFailOps());
   ASS(tester.checkILSDepths());
+  ASS(tester.checkNoConsecutiveNextOps());
 
   OptimizedClauseCodeTree<false>::OptimizedClauseMatcher wm;
   if (verbose) {
@@ -411,6 +449,7 @@ Kernel::Clause* checkSubsumptionResolution(Kernel::Clause *l, Kernel::Clause *m,
   ASS(tester.checkAllClausesAppear(clauses));
   ASS(tester.checkNoFailOps());
   ASS(tester.checkILSDepths());
+  ASS(tester.checkNoConsecutiveNextOps());
 
   if (verbose) {
     std::cout << wtree << std::endl;
@@ -489,6 +528,7 @@ TEST_FUN(lit_end_alternatives)
       ASS(tester.checkAllClausesAppear(addedClauses));
       ASS(tester.checkNoFailOps());
       ASS(tester.checkILSDepths());
+      ASS(tester.checkNoConsecutiveNextOps());
     }
   }
   OptimizedClauseCodeTree<false>::InvariantTester tester(wtree);
@@ -496,22 +536,9 @@ TEST_FUN(lit_end_alternatives)
   ASS(tester.checkAllClausesAppear(clauses));
   ASS(tester.checkNoFailOps());
   ASS(tester.checkILSDepths());
+  ASS(tester.checkNoConsecutiveNextOps());
 
   
-  ClauseCodeTree<false> ctree;
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,f2(x3,x4))), p(f2(x1,x4)), ~p(x3) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(x4,f2(x5,x6)))), ~p(f2(x3,x5)), ~p(x4), ~p(x6) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(f2(x4,f2(x5,x6)),f2(x5,x4)))), ~p(f2(x3,x6)) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(x4,x5))), ~p(f2(x3,x4)), ~p(x5) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(x4,x5))), ~p(x4), ~p(f2(x5,x3)) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(x4,f2(x5,x5)))), ~p(f2(x3,x4)) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(x4,f2(x5,f2(x4,x3))))), ~p(x5) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(x4,f2(x5,x3)))), ~p(f2(x5,x4)) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(x4,f2(x5,x3)))), ~p(x5), ~p(x4) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(f2(x4,x4),x3))) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(x4,x3))), ~p(x4) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(x4,f2(x4,x3)))) }));
-  ctree.insert(clause({ ~p(f2(x1,x2)), ~p(f2(x2,x3)), p(f2(x1,f2(f2(x3,x4),f2(x5,x5)))), ~p(x4) }));
 }
 
 TEST_FUN(example)
@@ -531,6 +558,7 @@ TEST_FUN(example)
   ASS(tester.checkAllClausesAppear(clauses));
   ASS(tester.checkNoFailOps());
   ASS(tester.checkILSDepths());
+  ASS(tester.checkNoConsecutiveNextOps());
 
 }
 
@@ -1324,6 +1352,29 @@ TEST_FUN(ReproduceRemoveDepthOneRealFailure)
   ASS(tester.checkSuccessAndFailOperationsAreFinal());
   ASS(tester.checkNoFailOps());
   ASS(tester.checkILSDepths());
+  ASS(tester.checkNoConsecutiveNextOps());
+
+  Kernel::Clause* D = clause({ ~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(f2(f2(x4,f2(x5,x2)),f2(x5,x4)),x3))) });
+  OptimizedClauseCodeTree<false>::OptimizedClauseMatcher m;
+  m.init(&wtree, D, true);
+  int resolvedQueryLit;
+  m.next(resolvedQueryLit); // crashed before
+}
+
+TEST_FUN(ConsecutiveNextOps)
+{
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION);
+  OptimizedClauseCodeTree<false> wtree;
+  wtree.insert(clause({ ~p(f2(x1,f2(x2,f2(x3,f2(x1,x4))))), ~p(f2(x3,x2)) }));
+  Kernel::Clause* result = clause({ ~p(x3) });
+  wtree.insert(result);
+  wtree.insert(clause({ ~p(f2(x3,f2(x2,f2(x4,x1)))), ~p(f2(x2,x3)) }));
+
+  OptimizedClauseCodeTree<false>::InvariantTester tester(wtree);
+  ASS(tester.checkSuccessAndFailOperationsAreFinal());
+  ASS(tester.checkNoFailOps());
+  ASS(tester.checkILSDepths());
+  ASS(tester.checkNoConsecutiveNextOps());
 
   Kernel::Clause* D = clause({ ~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(f2(f2(x4,f2(x5,x2)),f2(x5,x4)),x3))) });
   OptimizedClauseCodeTree<false>::OptimizedClauseMatcher m;
@@ -1354,6 +1405,7 @@ TEST_FUN(ReproduceRemove)
   ASS(tester.checkAllClausesAppear(clauses));
   ASS(tester.checkNoFailOps());
   ASS(tester.checkILSDepths());
+  ASS(tester.checkNoConsecutiveNextOps());
 
 }
 
@@ -1495,4 +1547,118 @@ TEST_FUN(CheckCorrectBindingsPropagation)
   Kernel::Clause* matched_clause = m.next(resolvedQueryLit);
   ASS_EQ(matched_clause, result);
   ASS_EQ(resolvedQueryLit, -1);
+}
+
+TEST_FUN(ReproducerNew)
+{
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION);
+  OptimizedClauseCodeTree<false> wtree;
+  wtree.insert(clause({p(f2(x1,f2(f2(x2,f2(x3,x1)),f2(x3,x2))))}));
+  wtree.insert(clause({~p(f2(f2(f2(c,f2(d,e)),e),f2(d,c)))}));
+  wtree.insert(clause({p(x1), ~p(x2), ~p(f2(x2,x1))}));
+  wtree.insert(clause({~p(x1), p(f2(f2(x2,f2(x3,x1)),f2(x3,x2)))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,f2(x3,x1))), p(f2(x3,x2))}));
+  wtree.insert(clause({~p(x1), p(f2(x2,f2(x1,f2(x2,x3)))), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x1,x2)), p(f2(f2(x2,f2(x1,x3)),x3))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x4,f2(x2,f2(x1,f2(x4,x3)))))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(f2(x2,f2(x1,x3))), p(x3)}));
+  wtree.insert(clause({~p(x1), ~p(x2), ~p(x3), p(f2(x1,f2(x3,x2)))}));
+  wtree.insert(clause({~p(x1), ~p(x2), ~p(f2(x3,x2)), p(f2(x1,x3))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,f2(x1,x4))))), p(x4), ~p(f2(x3,x2))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x1,x3)))), p(x2), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x1,x2)), p(f2(x2,x3)), ~p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),x3)), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(x1), ~p(x2), p(f2(x2,f2(x3,f2(x4,x1)))), ~p(f2(x4,x3))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,x3))), ~p(x4), p(f2(x4,x2)), ~p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),f2(x2,x1))), ~p(x4), p(f2(x4,x3))}));
+  wtree.insert(clause({~p(d)}));
+  wtree.insert(clause({~p(x1), ~p(x2), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(x4), p(f2(x3,f2(x2,f2(x4,x1))))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(f2(x3,f2(x2,f2(x4,x1)))), ~p(x5), p(f2(x5,x4))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(f2(x2,f2(x4,x1))), p(f2(x3,x4))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(f2(x3,x4)), p(f2(x2,f2(x4,x1)))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(x3), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(f2(x2,x1)), p(x3)}));
+  wtree.insert(clause({~p(f2(f2(c,f2(d,e)),e))}));
+  wtree.insert(clause({~p(f2(d,c))}));
+  wtree.insert(clause({~p(e)}));
+  wtree.insert(clause({p(f2(x1,x2)), ~p(x3), ~p(x4), ~p(f2(x2,f2(x1,f2(x4,x3))))}));
+  wtree.insert(clause({p(f2(x1,x2)), ~p(f2(x3,f2(x4,x1))), ~p(x2), ~p(f2(x4,x3))}));
+  wtree.insert(clause({p(f2(f2(x1,x2),x3)), ~p(f2(x2,f2(x1,x4))), ~p(x3), ~p(x4)}));
+  wtree.insert(clause({p(f2(f2(x1,f2(x2,f2(x3,x4))),x5)), ~p(x3), ~p(x5), ~p(x4), ~p(f2(x2,x1))}));
+  wtree.insert(clause({p(f2(f2(x1,f2(x2,x3)),x4)), ~p(x2), ~p(x4), ~p(x1), ~p(x3)}));
+  wtree.insert(clause({p(f2(f2(f2(x1,f2(x2,x3)),f2(x2,x1)),x4)), ~p(x3), ~p(x4)}));
+  wtree.insert(clause({p(f2(f2(x1,x2),x3)), ~p(x1), ~p(x2), ~p(x3)}));
+  wtree.insert(clause({p(x1), ~p(x2), ~p(x3), ~p(f2(x1,f2(x3,x2)))}));
+  wtree.insert(clause({p(f2(x1,f2(x2,x2))), ~p(x1)}));
+  wtree.insert(clause({p(x1), ~p(f2(x2,x3)), ~p(x4), ~p(f2(x3,f2(x2,f2(x4,x1))))}));
+  wtree.insert(clause({p(x1), ~p(f2(x2,x3)), ~p(f2(x2,f2(x4,x1))), ~p(x3), ~p(x4)}));
+  wtree.insert(clause({p(x1), ~p(f2(x2,f2(f2(x3,x1),f2(x2,x3))))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,x3)))), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(x1), p(x2), ~p(f2(x3,f2(x3,f2(x1,x2))))}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x1)), p(x2)}));
+
+  Kernel::Clause* C1 = clause({~p(x3)});
+  wtree.insert(C1);
+  wtree.remove(C1);
+
+  wtree.insert(clause({p(f2(x2,x2))}));
+  wtree.insert(clause({p(f2(f2(x2,x2),x3)), ~p(x3)}));
+  wtree.insert(clause({~p(x1), p(f2(x2,f2(x2,x1)))}));
+  wtree.insert(clause({~p(f2(x1,f2(x1,x2))), p(x2)}));
+  wtree.insert(clause({~p(x1), p(f2(x1,x2)), ~p(f2(x3,f2(x4,x2))), ~p(f2(x4,x3))}));
+  wtree.insert(clause({~p(x1), p(f2(x1,x2)), ~p(f2(x3,f2(x3,x2)))}));
+  wtree.insert(clause({~p(x1), p(f2(x1,x2)), ~p(x3), ~p(x4), ~p(f2(x3,f2(x4,x2)))}));
+  wtree.insert(clause({~p(f2(x1,x2)), p(f2(x2,f2(x1,x3))), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,x4)))), p(x3), ~p(x4), ~p(f2(x2,x1))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,x3))), p(x2), ~p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),f2(x2,x1))), p(x3)}));
+  wtree.insert(clause({~p(x1), p(f2(x1,x2)), ~p(x3), ~p(f2(x4,f2(x3,x5))), ~p(x5), ~p(f2(x4,x2))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(f2(x3,x3),x4)))), p(x4), ~p(f2(x2,x1))}));
+  wtree.insert(clause({~p(f2(x1,f2(f2(x2,x2),x3))), p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x2), p(f2(x1,f2(x3,x3)))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(f2(x1,f2(x3,x3))), p(x2)}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,f2(x4,x5))))), ~p(x5), ~p(f2(x4,x3)), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(f2(f2(x1,x2),f2(x3,x4))), ~p(x2), ~p(f2(x1,x3)), ~p(x5), p(f2(x5,x4))}));
+  wtree.insert(clause({~p(x1), ~p(x2), ~p(f2(x3,x4)), ~p(f2(x3,x2)), p(f2(x4,x1))}));
+  wtree.insert(clause({~p(x1), ~p(x2), ~p(f2(x3,x4)), ~p(f2(x4,x1)), p(f2(x3,x2))}));
+  wtree.insert(clause({~p(x2), ~p(x5), p(f2(f2(x4,f2(x3,x2)),x5)), ~p(f2(x3,x4))}));
+  wtree.insert(clause({~p(x2), ~p(f2(x3,x4)), ~p(f2(x3,x2)), ~p(x5), p(f2(x5,x4))}));
+  wtree.insert(clause({p(x1), ~p(f2(f2(x2,x2),x1))}));
+  wtree.insert(clause({p(f2(x1,f2(x2,x3))), ~p(x3), ~p(f2(x1,x2))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,x4)))), ~p(x5), p(f2(x1,f2(f2(x3,x2),x5))), ~p(x4)}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(f2(x4,x4),x3))), ~p(x2)}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(f2(x4,x5),x3))), ~p(x5), ~p(x4), ~p(x2)}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(f2(x4,f2(x5,x6)),x3))), ~p(x2), ~p(x6), ~p(f2(x5,x4))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(f2(x4,f2(x5,f2(x2,x6))),x3))), ~p(x6), ~p(f2(x5,x4))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(f2(x4,f2(x2,x5)),x3))), ~p(x4), ~p(x5)}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(f2(f2(x4,f2(x5,x2)),f2(x5,x4)),x3)))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,x4)))), ~p(x5), p(f2(x1,f2(x4,x5))), ~p(f2(x3,x2))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,x2))), ~p(x3), p(f2(x1,f2(x4,x3))), ~p(x4)}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(x4,x3))), ~p(x2), ~p(x4)}));
+  wtree.insert(clause({~p(x1), ~p(f2(x2,x3)), ~p(x4), p(f2(x2,f2(f2(x3,x1),x4)))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,x3))), p(x3), ~p(f2(x1,x2))}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,f2(x3,x4))),x5)), ~p(x4), p(f2(x5,x3)), ~p(f2(x2,x1))}));
+  wtree.insert(clause({~p(f2(f2(x1,x1),x2)), ~p(x3), p(f2(x2,x4)), ~p(f2(x4,x3))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x2,x4)), ~p(x1), ~p(f2(x4,x3))}));
+  wtree.insert(clause({~p(f2(f2(x1,x2),x3)), ~p(x2), p(f2(x3,x1))}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),x4)), ~p(x1), p(f2(x4,x2)), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(f2(x3,x4)), p(f2(x2,x5)), ~p(x1), ~p(x4), ~p(f2(x3,x5))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(f2(x3,f2(x1,x4))), p(f2(x2,x5)), ~p(x4), ~p(f2(x3,x5))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(f2(x3,x4)), p(f2(x2,f2(x4,f2(x3,x1))))}));
+  wtree.insert(clause({~p(f2(x1,x2)), p(f2(x2,x1))}));
+
+  Kernel::Clause* D = clause({p(f2(x1,f2(x2,x3))), ~p(f2(x4,x4)), ~p(x3), ~p(f2(x2,x1))});
+  int resolvedQueryLit;
+  OptimizedClauseCodeTree<false>::OptimizedClauseMatcher m;
+  m.init(&wtree, D, true);
+  m.next(resolvedQueryLit);
+}
+
+TEST_FUN(DecreasingOverlapsWithinClause)
+{
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION);
+  std::vector<Kernel::Clause*> clauses;
+  clauses.push_back(clause({ p3(c,c,c), p3(c,c,e), p3(c,e,e) }));
+  checkOptimization(clauses, nullptr, true);
 }
