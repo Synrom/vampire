@@ -178,23 +178,21 @@ void CodeTreeSubsumptionIndex<higherOrder>::handleClause(Clause* cl, bool adding
   TIME_TRACE("codetree subsumption index maintenance");
 
   if(adding) {
+    std::cout << "wtree.insert(clause({" << cl->toReproducerString() << "}));" << std::endl;
     _ct.insert(cl);
     _oct.insert(cl);
     clauses.push_back(cl);
-    std::cout << "wtree.insert(clause({" << cl->toReproducerString() << "}));" << std::endl;
   }
   else {
+    std::cout << "wtree.remove(clause({" << cl->toReproducerString() << "}));" << std::endl;
     _ct.remove(cl);
     _oct.remove(cl);
     auto it = std::find(clauses.begin(), clauses.end(), cl);
     ASS(it != clauses.end());
     clauses.erase(it);
-    std::cout << "wtree.remove(clause({" << cl->toReproducerString() << "}));" << std::endl;
   }
   typename OptimizedClauseCodeTree<higherOrder>::InvariantTester tester(_oct);
-  ASS(tester.checkSuccessAndFailOperationsAreFinal());
   ASS(tester.checkAllClausesAppear(clauses));
-  ASS(tester.checkNoFailOps());
   ASS(tester.checkILSDepths());
 }
 

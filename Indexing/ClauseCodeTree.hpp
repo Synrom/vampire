@@ -62,9 +62,19 @@ protected:
     using Base = Matcher</*removing*/true,false,higherOrder>;
     using CheckPoint = typename Base::CheckPoint;
     using RecordedCheckPoint = typename Base::RecordedCheckPoint;
+    using Base::op;
+    using Base::finished;
+    using Base::_matched;
 
     void init(CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_,
 	ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_, bool reachedByNext_=false, Stack<CheckPoint>&& checkpoints_=Stack<CheckPoint>(), unsigned nrNextBins=0);
+
+    void doEagerMatching();
+    bool execute();
+
+    bool _eagerlyMatched = false;
+    Stack<CodeOp*> eagerResults;
+    Stack<Stack<CodeOp*>> eagerResultsFirstInBlocks;
 
     USE_ALLOCATOR(RemovingLiteralMatcher);
   };
@@ -179,6 +189,8 @@ public:
   using SearchStruct = typename Base::SearchStruct ;
   using LitInfo = typename Base::LitInfo;
   using RemovingLiteralMatcher = typename Base::RemovingLiteralMatcher;
+  using CheckPoint = typename RemovingLiteralMatcher::CheckPoint;
+  using RecordedCheckPoint = typename RemovingLiteralMatcher::RecordedCheckPoint;
   using CodeBlock = typename Base::CodeBlock;
   using InitialLiteralOrderingComparator = typename Base::InitialLiteralOrderingComparator;
 

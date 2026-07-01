@@ -129,6 +129,8 @@ public:
     };
     Stack<Bin> nextBinIndices;
     inline bool reachedByNextOp() const { return nextBinIndices.isNonEmpty(); }
+    bool jumpsToOp(CodeOp* op) const;
+    void replaceJump(CodeOp* oldOp, CodeOp* newOp);
     unsigned refCount=1;
 
     unsigned* globalVarNumbers;
@@ -338,6 +340,7 @@ public:
 
   struct FibDepthFieldRemoving {
     size_t fibDepth;
+    Stack<CodeOp*> firstsInBlocks;
   };
 
   /**
@@ -382,42 +385,39 @@ public:
       size_t fibDepth;
     };
 
-    struct CheckPoint
+    struct CheckPoint : std::conditional_t<removing, FibDepthFieldRemoving, FibDepthField>
     {
       size_t liIndex;
       BindingArray bindings;
-      std::conditional_t<removing,BTPointRemoving,BTPoint> btPoint;
+      BTPoint btPoint;
+
+      CheckPoint(size_t liIndex_, BindingArray&& bindings_, size_t tp, CodeOp* op, size_t fibDepth_=0, Stack<CodeOp*> firstsInBlocks_ = Stack<CodeOp*>()) 
+        : liIndex(liIndex_), bindings(bindings_), btPoint(tp, op)
+      {
+        if constexpr (removing) {
+          FibDepthFieldRemoving::fibDepth = fibDepth_;
+          FibDepthFieldRemoving::firstsInBlocks = firstsInBlocks_;
+        }
+      }
     };   
 
     struct RecordedCheckPoint
-      : std::conditional_t<removing, FibDepthFieldRemoving, FibDepthField>
     {
       size_t liIndex;
       BindingArray bindings;
       size_t tp;
 
-      RecordedCheckPoint(size_t liIndex_, BindingArray&& bindings_, size_t tp_, size_t fibDepth_=0)
+      RecordedCheckPoint(size_t liIndex_, BindingArray&& bindings_, size_t tp_)
         : liIndex(liIndex_), bindings(bindings_), tp(tp_) 
         {
-          if constexpr (removing) {
-            FibDepthFieldRemoving::fibDepth = fibDepth_;
-          }
+          
         }
 
-      inline CheckPoint toCheckpoint(CodeOp *op) {
+      inline CheckPoint toCheckpoint(CodeOp *op, Stack<CodeOp*> firstInBlock_ = Stack<CodeOp*>()) {
         if constexpr (removing) {
-          return CheckPoint{
-            liIndex,
-            bindings.clone(),
-            BTPointRemoving{tp, op, FibDepthFieldRemoving::fibDepth}
-          };
-        } else {
-          return CheckPoint {
-            liIndex,
-            bindings.clone(),
-            BTPoint{tp, op}
-          };
+          return CheckPoint(liIndex, bindings.clone(), tp, op, firstInBlock_.length(), firstInBlock_);
         }
+        return CheckPoint(liIndex, bindings.clone(), tp, op);
       }
     };   
 

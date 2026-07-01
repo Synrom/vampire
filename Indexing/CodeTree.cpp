@@ -264,6 +264,31 @@ void CodeTree::ILStruct::ensureFreshness(unsigned globalTimestamp)
   }
 }
 
+bool CodeTree::ILStruct::jumpsToOp(CodeOp* op) const
+{
+  for (Bin& bin : nextBinIndices) {
+    if (bin.entry == op) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void CodeTree::ILStruct::replaceJump(CodeOp* oldOp, CodeOp* newOp)
+{
+  for (unsigned i=0; i < nextBinIndices.length(); i++) {
+    if (nextBinIndices[i].entry == oldOp) {
+      if (newOp) {
+        nextBinIndices[i].entry = newOp;
+        break;
+      } else {
+        nextBinIndices.swapRemove(i);
+        break;
+      }
+    }
+  }
+}
+
 void CodeTree::ILStruct::addMatch(unsigned liIndex, DArray<TermList>& bindingArray)
 {
   if(matchCnt==matches.size()) {
@@ -748,7 +773,8 @@ bool CodeTree::Matcher<removing, checkRange, higherOrder>::prepareLiteral()
       tp=bp.tp;
       op=bp.op;
       if constexpr (removing) {
-        RemovingBase::firstsInBlocks->truncate(bp.fibDepth);
+        *RemovingBase::firstsInBlocks = checkpoint.firstsInBlocks;
+        ASS_EQ(RemovingBase::firstsInBlocks->length(), checkpoint.fibDepth);
         RemovingBase::firstsInBlocks->push(op);
       }
       return true;
@@ -851,20 +877,11 @@ inline void CodeTree::Matcher<removing, checkRange, higherOrder>::doNextOp()
   for (unsigned i=0;i < boundedSize; i++) {
     clonedBinding[i] = bindings[i];
   }
-  if constexpr (removing) {
-    nextBins[bin].push(RecordedCheckPoint(
-      curLInfo,
-      std::move(clonedBinding),
-      tp,
-      RemovingBase::firstsInBlocks->size()
-    ));
-  } else {
-    nextBins[bin].push(RecordedCheckPoint(
-      curLInfo,
-      std::move(clonedBinding),
-      tp
-    ));
-  }
+  nextBins[bin].push(RecordedCheckPoint(
+    curLInfo,
+    std::move(clonedBinding),
+    tp
+  ));
 }
 
 template<bool removing, bool checkRange, bool higherOrder>

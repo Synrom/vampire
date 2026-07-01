@@ -724,7 +724,7 @@ typename OptimizedClauseCodeTree<higherOrder>::CodeOp** OptimizedClauseCodeTree<
     treeOp++;
   }
   for (;;) {
-    if (pathIdx < matchedPath.length() && matchedPath[pathIdx] == treeOp->alternative()) {
+    if (treeOp->alternative()) {
       treeOp = treeOp->alternative();
       pathIdx++;
       continue;
@@ -1226,7 +1226,24 @@ void OptimizedClauseCodeTree<higherOrder>::remove(Clause* cl)
     {
       Recycled<RemovingLiteralMatcher, NoReset> rrlm; // take rlm out of recycling
       rlm = &*rrlm; // get the actual content (also to use after this initialization block)
-      rlm->init(op, lInfos.array(), lInfos.size(), this, &*firstsInBlocks, false, Stack<typename RemovingLiteralMatcher::CheckPoint>(), nextBinCnt); // init it
+      Stack<CheckPoint> checkpoints;
+      ILStruct* ils = nullptr;
+      if (rlms->size() > 0) {
+        rlms->top()->doEagerMatching();
+        ils = rlms->top()->op->getILS();
+        for (Bin &bin: ils->nextBinIndices) {
+          for (RecordedCheckPoint cp : rlms->top()->nextBins[bin.index]) {
+            checkpoints.push(cp.toCheckpoint(bin.entry, *(rlms->top()->firstsInBlocks)));
+          }
+        }
+      }
+      CodeOp* newLitEntry;
+      if (ils) {
+        newLitEntry = ils->hasSuccessor ? rlms->top()->op + 1 : nullptr;
+      } else {
+        newLitEntry = getEntryPoint();
+      }
+      rlm->init(newLitEntry, lInfos.array(), lInfos.size(), this, &*firstsInBlocks, ils ? ils->reachedByNextOp() : false, std::move(checkpoints), ils ? ils->nextBinCnt : nextBinCnt); // init it
       rlms->push(std::move(rrlm)); // store it in rlms (along with the obligation to return to recycling when no longer used)
     }
 
@@ -1252,9 +1269,8 @@ void OptimizedClauseCodeTree<higherOrder>::remove(Clause* cl)
     }
     op->getILS()->timestamp=_curTimeStamp;
 
-    op++;
     if(depth==clen-1) {
-      if(removeOneOfAlternatives(op, cl, &*firstsInBlocks)) {
+      if(op->hasSuccessor() && removeOneOfAlternatives(op+1, cl, &*firstsInBlocks)) {
         //successfully removed
         break;
       }
@@ -1270,11 +1286,67 @@ void OptimizedClauseCodeTree<higherOrder>::remove(Clause* cl)
 }
 
 template<bool higherOrder>
+void ClauseCodeTree<higherOrder>::RemovingLiteralMatcher::doEagerMatching()
+{
+  if (_eagerlyMatched) return;
+
+  Stack<CodeOp*> firstsInBlocksCopy = *RemovingBase::firstsInBlocks;
+  ASS(eagerResults.isEmpty());
+
+  //backup the current op
+  CodeOp* currOp=op;
+  Stack<CodeOp*> currFirstInBlocks = *RemovingBase::firstsInBlocks;
+
+  static Stack<CodeOp*> eagerResultsRevOrder;
+  static Stack<Stack<CodeOp*>> eagerResultsRevOrderFirstInBlocks;
+  static Stack<CodeOp*> successes;
+  static Stack<Stack<CodeOp*>> successesFirstInBlocks;
+
+  eagerResultsRevOrder.reset();
+  successes.reset();
+  eagerResultsRevOrderFirstInBlocks.reset();
+  successesFirstInBlocks.reset();
+
+  while(execute()) {
+    if(op->isLitEnd()) {
+      eagerResultsRevOrder.push(op);
+      eagerResultsRevOrderFirstInBlocks.push(*RemovingBase::firstsInBlocks);
+    }
+    else {
+      ASS(op->isSuccess());
+      successes.push(op);
+      successesFirstInBlocks.push(*RemovingBase::firstsInBlocks);
+    }
+  }
+
+  //we want to yield results in the order we found them
+  //(otherwise the subsumption resolution would be preferred to the
+  //subsumption)
+  while(eagerResultsRevOrder.isNonEmpty()) {
+    eagerResults.push(eagerResultsRevOrder.pop());
+    eagerResultsFirstInBlocks.push(eagerResultsRevOrderFirstInBlocks.pop());
+  }
+  //we want to yield SUCCESS operations first (as after them there may
+  //be no need for further clause retrieval)
+  while(successes.isNonEmpty()) {
+    eagerResults.push(successes.pop());
+    eagerResultsFirstInBlocks.push(successesFirstInBlocks.pop());
+  }
+
+  _eagerlyMatched=true;
+
+  op=currOp; //restore the current op
+  *RemovingBase::firstsInBlocks = currFirstInBlocks;
+}
+
+template<bool higherOrder>
 void ClauseCodeTree<higherOrder>::RemovingLiteralMatcher::init(CodeOp* entry_, LitInfo* linfos_,
     size_t linfoCnt_, ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_, bool reachedByNext_, Stack<CheckPoint>&& checkpoints_, unsigned nrNextBins)
 {
   Base::init(tree_, entry_, linfos_, linfoCnt_, firstsInBlocks_, reachedByNext_, std::move(checkpoints_), nrNextBins);
-
+  eagerResults.reset();
+  eagerResultsFirstInBlocks.reset();
+  _eagerlyMatched = false;
   ALWAYS(Base::prepareLiteral());
 }
 
@@ -1330,6 +1402,45 @@ void OptimizedClauseCodeTree<higherOrder>::optimizeMemoryAfterRemoval(Stack<Code
   LOG_OP("firstsInBlocks->size()="<<firstsInBlocks->size());
 
   //now let us remove unnecessary instructions and the free memory
+  bool haveDecreasedRefCounts = false;
+  for (unsigned i=firstsInBlocks->length()-1; firstsInBlocks->length() > 0; i--) {
+    CodeOp* firstOp = (*firstsInBlocks)[i];
+    CodeBlock* block = CodeTree::firstOpToCodeBlock((*firstsInBlocks)[i]);
+    CodeOp* afterLastOp = firstOp + block->length();
+    CodeOp* pointingOp  = firstOp;
+    // find pointing Op
+    if (i < firstsInBlocks->length()-1) {
+      while (pointingOp < afterLastOp)  {
+        if (pointingOp->alternative() == (*firstsInBlocks)[i+1]) {
+          break;
+        }
+        if (pointingOp->isLitEnd() && pointingOp->getILS()->jumpsToOp((*firstsInBlocks)[i+1])) {
+          break;
+        }
+        pointingOp++;
+      }
+    } else {
+      pointingOp = afterLastOp - 1;
+    }
+    
+    // iterate down from pointingOp
+    while (pointingOp >= firstOp) {
+      if (pointingOp->isLitEnd()) {
+        ILStruct* ils = pointingOp->getILS();
+        while (ils) {
+          ils->refCount--;
+          ils = ils->previous;
+        }
+        haveDecreasedRefCounts = true;
+        break;
+      }
+      pointingOp--;
+    }
+
+    if (haveDecreasedRefCounts || i==0) {
+      break;
+    }
+  }
 
   CodeOp* op=removedOp;
   ASS(firstsInBlocks->isNonEmpty());
@@ -1348,7 +1459,9 @@ void OptimizedClauseCodeTree<higherOrder>::optimizeMemoryAfterRemoval(Stack<Code
     if(op!=firstOp) {
       ASS(op->alternative());
       //we only change the instruction, the alternative must remain unchanged
-      op->makeFail();
+      if (!op->isLitEnd() || !op->getILS()->refCount) {
+        op->makeFail();
+      }
       return;
     }
     CodeOp* alt=firstOp->alternative();
@@ -1379,12 +1492,12 @@ void OptimizedClauseCodeTree<higherOrder>::optimizeMemoryAfterRemoval(Stack<Code
       for(size_t i=cbLen-1;cbLen > 0;i--) {
         if((*cb)[i].isLitEnd()) {
           prev = (*cb)[i].getILS()->previous;
-          ILStruct* ils = prev;
-          while (ils) {
-            ils->refCount--;
-            ils = ils->previous;
-          }
+          if ((*cb)[i].getILS()->refCount) {
+            if (i != cbLen-1) (*cb)[i+1].makeFail();
+            return;
+          } 
           delete (*cb)[i].getILS();
+          (*cb)[i].makeFail();
         }
         if (i==0) break;
       }
@@ -1444,13 +1557,26 @@ void OptimizedClauseCodeTree<higherOrder>::optimizeMemoryAfterRemoval(Stack<Code
 
     CodeOp* prevAfterLastOp=prevFirstOp+pcb->length();
     CodeOp* prevOp=prevFirstOp;
+    CodeOp* reachedByILS = nullptr;
     while(prevOp->alternative()!=firstOp) {
       ASS_L(prevOp,prevAfterLastOp);
+      if (prevOp->isLitEnd() && prevOp->getILS()->jumpsToOp(firstOp)) {
+        reachedByILS = prevOp; 
+        break;
+      }
       prevOp++;
     }
     pointingOp=prevOp;
 
-    pointingOp->setAlternative(alt);
+    if (reachedByILS) {
+      reachedByILS->getILS()->replaceJump(firstOp, alt);
+      if (reachedByILS->getILS()->refCount > 0) {
+        return;
+      }
+    } else {
+      pointingOp->setAlternative(alt);
+    }
+
     if(pointingOp->isSuccess()) {
       return;
     }
@@ -1546,6 +1672,33 @@ bool ClauseCodeTree<higherOrder>::LiteralMatcher::next()
   if(op->isLitEnd()) {
     recordMatch();
   }
+  return true;
+}
+
+template<bool higherOrder>
+bool ClauseCodeTree<higherOrder>::RemovingLiteralMatcher::execute()
+{
+  if(_eagerlyMatched) {
+    _matched=!eagerResults.isEmpty();
+    if(!_matched) {
+      return false;
+    }
+    op=eagerResults.pop();
+    *RemovingBase::firstsInBlocks = eagerResultsFirstInBlocks.pop();
+    return true;
+  }
+
+  if(finished()) {
+    //all possible matches are exhausted
+    return false;
+  }
+
+  _matched=Base::execute();
+  if(!_matched) {
+    return false;
+  }
+
+  ASS(op->isLitEnd() || op->isSuccess());
   return true;
 }
 
@@ -1695,6 +1848,9 @@ void ClauseCodeTree<higherOrder>::ClauseMatcher::init(ClauseCodeTree* tree_, Cla
 template<bool higherOrder>
 bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkSuccessAndFailOperationsAreFinal()
 {
+  if (tree._entryPoint == nullptr) {
+    return true;
+  }
   Stack<CodeOp*> queue;
   queue.push(tree._entryPoint);
   while (queue.isNonEmpty()) {
@@ -1733,6 +1889,10 @@ bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkSuccessAndFailO
 template<bool higherOrder>
 bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkAllClausesAppear(std::vector<Clause*> clauses)
 {
+  if (tree._entryPoint == nullptr) {
+    ASS(clauses.empty());
+    return true;
+  }
   std::vector<bool> appears(clauses.size(), false);
   Stack<CodeOp*> queue;
   queue.push(tree._entryPoint);
@@ -1779,6 +1939,9 @@ bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkAllClausesAppea
 template<bool higherOrder>
 bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkNoFailOps()
 {
+  if (tree._entryPoint == nullptr) {
+    return true;
+  }
   bool check = true;
   tree.visitAllOps([&check](const CodeOp* op, unsigned depth, bool litStart) {
     if (op->isFail()) {
@@ -1792,6 +1955,9 @@ bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkNoFailOps()
 template<bool higherOrder>
 bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkNoConsecutiveNextOps()
 {
+  if (tree._entryPoint == nullptr) {
+    return true;
+  }
   Stack<CodeOp*> queue;
   queue.push(tree._entryPoint);
   while (queue.isNonEmpty()) {
@@ -1834,6 +2000,9 @@ bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkNoConsecutiveNe
 template<bool higherOrder>
 bool OptimizedClauseCodeTree<higherOrder>::InvariantTester::checkILSDepths()
 {
+  if (tree._entryPoint == nullptr) {
+    return true;
+  }
   Stack<std::pair<CodeOp*, unsigned>> queue;
   queue.push(std::make_pair(tree._entryPoint, 0));
   while(queue.isNonEmpty()) {
