@@ -69,11 +69,13 @@ class CodeTreeSubsumptionIndex
 public:
   CodeTreeSubsumptionIndex(SaturationAlgorithm&) {}
   ClauseCodeTree<higherOrder>* getClauseCodeTree() { return &_ct; }
+  OptimizedClauseCodeTree<higherOrder>* getOptimizedClauseCodeTree() { return &_optimizedCt; }
 protected:
   void handleClause(Clause* c, bool adding) override;
 private:
 
   ClauseCodeTree<higherOrder> _ct;
+  OptimizedClauseCodeTree<higherOrder> _optimizedCt;
 };
 
 };

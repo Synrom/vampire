@@ -76,6 +76,8 @@ void ClauseCodeTree<higherOrder>::insert(Clause* cl)
   for(unsigned i=0;i<clen;i++) {
     compiler.nextLit();
     compiler.handleTerm(lits[i]);
+    ASS(code.top().isLitEnd());
+    code.top().getILS()->depth = i;
   }
   code.push(CodeOp::getSuccess(cl));
 
@@ -314,6 +316,9 @@ bool ClauseCodeTree<higherOrder>::removeOneOfAlternatives(CodeOp* op, Clause* cl
 {
   unsigned initDepth=firstsInBlocks->size();
 
+  CodeOp* ilsOp = op-1;
+  ASS(ilsOp->isLitEnd());
+
   while(!op->isSuccess() || op->getSuccessResult<Clause>()!=cl) {
     op=op->alternative();
     if(!op) {
@@ -322,9 +327,481 @@ bool ClauseCodeTree<higherOrder>::removeOneOfAlternatives(CodeOp* op, Clause* cl
     }
     firstsInBlocks->push(op);
   }
+  ILStruct* ils = ilsOp->getILS();
+  while (ils) {
+    if (ils->nrChildren) ils->nrChildren--;
+    if (ils->nrChildren) break;
+    ils = ils->previous;
+  }
   op->makeFail();
   optimizeMemoryAfterRemoval(firstsInBlocks, op);
   return true;
+}
+
+//////////////// optimized clause code tree ////////////////////
+
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::optimizeLiteralOrder(DArray<Literal*>& lits)
+{
+  unsigned clen=lits.size();
+  int unsharedIndex = -1;
+  CodeTree::CodeOp* entry=0;
+  if(this->isEmpty() || clen<=1) {
+    unsharedIndex = 0;
+    goto optimize_intra_clausal_order;
+  }
+
+  lits.sort(typename Base::InitialLiteralOrderingComparator());
+
+  entry=this->getEntryPoint();
+  for(unsigned startIndex=0;startIndex<clen-1;startIndex++) {
+//  for(unsigned startIndex=0;startIndex<1;startIndex++) {
+
+    size_t unshared=1;
+    unsigned bestIndex=startIndex;
+    size_t bestSharedLen;
+    bool bestGround=lits[startIndex]->ground();
+    CodeTree::CodeOp* nextOp;
+    this->evalSharing(lits[startIndex], entry, bestSharedLen, unshared, nextOp);
+    if(!unshared) {
+      goto have_best;
+    }
+
+    for(unsigned i=startIndex+1;i<clen;i++) {
+      size_t sharedLen;
+      this->evalSharing(lits[i], entry, sharedLen, unshared, nextOp);
+      if(!unshared) {
+	bestIndex=i;
+        goto have_best;
+      }
+
+      if(sharedLen>bestSharedLen && (!bestGround || lits[i]->ground()) ) {
+//	cout<<lits[i]->toString()<<" is better than "<<lits[bestIndex]->toString()<<endl;
+	bestSharedLen=sharedLen;
+	bestIndex=i;
+	bestGround=lits[i]->ground();
+      }
+    }
+
+  have_best:
+    swap(lits[startIndex],lits[bestIndex]);
+
+    if(unshared) {
+      //we haven't matched the whole literal, so we won't proceed with the next one
+      unsharedIndex = startIndex;
+      break;
+    }
+    ASS(nextOp);
+    entry=nextOp;
+  }
+  
+optimize_intra_clausal_order:
+  if (unsharedIndex >= clen - 1) return;
+
+  for (unsigned startIndex=unsharedIndex; startIndex < clen-2; startIndex++) {
+    unsigned bestIndex = startIndex+1;
+    size_t bestSharedLen = evalSharingBetweenLiterals(lits[startIndex], lits[bestIndex]);
+    for (unsigned i=startIndex+2; i < clen; i++) {
+      size_t sharedLen = evalSharingBetweenLiterals(lits[startIndex], lits[i]);
+      if (sharedLen > bestSharedLen) {
+        bestSharedLen = sharedLen;
+        bestIndex = i;
+      }
+    }
+    swap(lits[startIndex+1], lits[bestIndex]);
+  }
+}
+
+template<bool higherOrder>
+size_t OptimizedClauseCodeTree<higherOrder>::evalSharingBetweenLiterals(Literal* lit1, Literal* lit2)
+{
+  CodeTree::CodeStack lit1Code;
+  CodeTree::LitCompiler lit1Compiler(lit1Code);
+  lit1Compiler.handleTerm(lit1);
+
+  CodeTree::CodeStack lit2Code;
+  CodeTree::LitCompiler lit2Compiler(lit2Code);
+  lit2Compiler.handleTerm(lit2);
+
+  size_t shared = 0;
+  for(size_t i=0; i < lit1Code.length() && i < lit2Code.length(); i++, shared++) {
+    if(!lit1Code[i].equalsForOpMatching(lit2Code[i])) {
+      break;
+    }
+    if(lit1Code[i].isLitEnd()) {
+      break;
+    }
+  }
+
+  while(lit1Code.isNonEmpty()) {
+    if(lit1Code.top().isLitEnd()) {
+      delete lit1Code.top().getILS();
+    }
+    lit1Code.pop();
+  }
+  while(lit2Code.isNonEmpty()) {
+    if(lit2Code.top().isLitEnd()) {
+      delete lit2Code.top().getILS();
+    }
+    lit2Code.pop();
+  }
+
+  return shared;
+}
+
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::insert(Clause* cl)
+{
+  unsigned clen=cl->length();
+  static DArray<Literal*> lits;
+  lits.initFromArray(clen, *cl);
+
+  optimizeLiteralOrder(lits);
+
+  CodeTree::CodeStack code;
+  CodeTree::LitCompiler compiler(code);
+
+  static const unsigned nextLitAlternativeThreshold = 1;
+
+  unsigned lastLitOffset = 0;
+  bool lastLiteralWasMerged = false;
+  for(unsigned i=0;i<clen;i++) {
+    unsigned loffset = lastLitOffset;
+    unsigned roffset = code.length();
+
+    compiler.nextLit();
+    compiler.handleTerm(lits[i]);
+    ASS(code.top().isLitEnd());
+    code.top().getILS()->depth = i;
+
+    unsigned newLitInstr = code.length() - roffset;
+    unsigned oldLitInstr = roffset - loffset;
+
+    unsigned cmpLength = min(newLitInstr, oldLitInstr);
+    unsigned matchedInstr = 0;
+    for (unsigned idx=0; idx < cmpLength; idx++) {
+      if (code[loffset + idx].equalsForOpMatching(code[roffset + idx])) {
+        matchedInstr++;
+      } else {
+        break;
+      }
+    }
+
+    if (matchedInstr > nextLitAlternativeThreshold && !lastLiteralWasMerged) {
+      lastLiteralWasMerged = true;
+      ILStruct* prev;
+      CodeTree::CodeStack insertedCode(roffset);
+      for (unsigned k=0; k < roffset; k++) {
+        if (code[k].isLitEnd()) {
+          prev = new ILStruct(*code[k].getILS());
+          insertedCode.push(CodeTree::CodeOp::getLitEnd(prev));
+        } else {
+          insertedCode.push(code[k]);
+        }
+      }
+      incorporate(insertedCode, &prev); 
+      for (unsigned k=0; k < oldLitInstr; k++) {
+        if (code[loffset + k].isLitEnd()) {
+          delete code[loffset+k].getILS();
+        }
+      }
+      for (unsigned k=0; k < newLitInstr; k++) {
+        swap(code[loffset+k], code[roffset+k]);
+        if (code[loffset+k].isLitEnd()) {
+          code[loffset + k].getILS()->putIntoSequence(prev);
+        }
+      }
+      code.truncate(code.length() - oldLitInstr);
+    } else {
+      lastLitOffset = roffset;
+      lastLiteralWasMerged = false;
+    }
+  }
+  code.push(CodeTree::CodeOp::getSuccess(cl));
+
+  compiler.updateCodeTree(this);
+
+  incorporate(code, nullptr);
+  ASS(code.isEmpty());
+}
+
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::remove(Clause* cl)
+{
+  static DArray<CodeTree::LitInfo> lInfos;
+  Recycled<Stack<CodeTree::CodeOp*>> firstsInBlocks;
+  Recycled<Stack<Recycled<OptimizedRemovingLiteralMatcher, NoReset>>> rlms;
+
+  unsigned clen=cl->length();
+  lInfos.ensure(clen);
+
+  if(!clen) {
+    CodeTree::CodeOp* op=this->getEntryPoint();
+    firstsInBlocks->push(op);
+    if(!this->removeOneOfAlternatives(op, cl, &*firstsInBlocks)) {
+      ASSERTION_VIOLATION;
+      INVALID_OPERATION("empty clause to be removed was not found");
+    }
+    return;
+  }
+
+  for(unsigned i=0;i<clen;i++) {
+    lInfos[i]=CodeTree::LitInfo(cl,i);
+    lInfos[i].liIndex=i;
+  }
+  this->incTimeStamp();
+
+  CodeTree::CodeOp* op=this->getEntryPoint();
+  firstsInBlocks->push(op);
+  unsigned depth=0;
+  for(;;) {
+    OptimizedRemovingLiteralMatcher* rlm = 0;
+    {
+      Recycled<OptimizedRemovingLiteralMatcher, NoReset> rrlm; // take rlm out of recycling
+      rlm = &*rrlm; // get the actual content (also to use after this initialization block)
+      CodeTree::CodeOp* lastEntry = rlms->size() > 0 ? rlms->top()->entry : nullptr;
+      rlm->init(op, lastEntry, lInfos.array(), lInfos.size(), this, &*firstsInBlocks); // init it
+      rlms->push(std::move(rrlm)); // store it in rlms (along with the obligation to return to recycling when no longer used)
+    }
+
+  iteration_restart:
+    if(!rlm->execute()) {
+      if(depth==0) {
+        ASSERTION_VIOLATION;
+        INVALID_OPERATION("clause to be removed was not found");
+      }
+      rlms->pop();
+      depth--;
+      rlm = &*rlms->top();
+      goto iteration_restart;
+    }
+
+    op=rlm->op;
+    ASS(op->isLitEnd());
+    ASS(op->getILS()->depth <= depth);
+
+    if (op->getILS()->depth < depth) {
+      goto iteration_restart;
+    }
+
+    if(op->getILS()->timestamp==this->_curTimeStamp) {
+      //we have already been here
+      goto iteration_restart;
+    }
+    op->getILS()->timestamp=this->_curTimeStamp;
+
+    op++;
+    if(depth==clen-1) {
+      if(this->removeOneOfAlternatives(op, cl, &*firstsInBlocks)) {
+        //successfully removed
+        break;
+      }
+      goto iteration_restart;
+    }
+    ASS_L(depth,clen-1);
+    depth++;
+  }
+
+  for(unsigned i=0;i<clen;i++) {
+    lInfos[i].dispose();
+  }
+}
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::OptimizedRemovingLiteralMatcher::execute()
+{
+  if (MatcherBase::execute()) {
+    return true;
+  } else if (secondEntry && entry != secondEntry) {
+    MatcherBase::curLInfo = 0;
+    entry = secondEntry;
+    MatcherBase::prepareLiteral();
+    return MatcherBase::execute();
+  }
+  return false;
+}
+
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::OptimizedRemovingLiteralMatcher::init(
+    CodeTree::CodeOp* entry_, CodeTree::CodeOp* lastEntry, CodeTree::LitInfo* linfos_, size_t linfoCnt_,
+    OptimizedClauseCodeTree* tree_, Stack<CodeTree::CodeOp*>* firstsInBlocks_)
+{
+  MatcherBase::init(tree_, entry_, linfos_, linfoCnt_, firstsInBlocks_);
+  secondEntry = lastEntry;
+
+  ALWAYS(MatcherBase::prepareLiteral());
+}
+
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::incorporate(CodeTree::CodeStack& code, CodeTree::ILStruct** prev)
+{
+  if(this->isEmpty()) {
+    this->_entryPoint=CodeTree::buildBlock(code, code.length(), 0);
+    code.reset();
+    return;
+  }
+
+  static const unsigned checkFunOpThreshold=5; //must be greater than 1 or it would cause loops
+  static const unsigned checkGroundTermOpThreshold=3; //must be greater than 1 or it would cause loops
+
+  size_t clen=code.length();
+  CodeTree::CodeOp** tailTarget;
+  size_t matchedCnt;
+  CodeTree::ILStruct* lastMatchedILS=0;
+  CodeTree::CodeOp** currentBlockReference = nullptr;
+  bool appendToBlock = false;
+
+  {
+    CodeTree::CodeOp* treeOp = this->getEntryPoint();
+
+    for (size_t i = 0; i < clen; i++) {
+      CodeTree::CodeOp* chainStart = treeOp;
+      CodeTree::CodeOp** chainStartReference = currentBlockReference;
+      size_t checkFunOps = 0;
+      size_t checkGroundTermOps = 0;
+      for (;;) {
+        if (treeOp->isSearchStruct()) {
+          //handle the SEARCH_STRUCT
+          CodeTree::SearchStruct* ss = treeOp->getSearchStruct();
+          CodeTree::CodeOp** toPtr;
+          if (ss->getTargetOpPtr<true>(code[i], toPtr)) {
+            if (!*toPtr) {
+              tailTarget = toPtr;
+              matchedCnt = i;
+              goto matching_done;
+            }
+            currentBlockReference = toPtr;
+            treeOp = *toPtr;
+            continue;
+          }
+        } else if (code[i].equalsForOpMatching(*treeOp)) {
+          //matched, go to the next compiled instruction
+          break;
+        }
+
+        if (treeOp->alternative()) {
+          //try alternative if there is some
+          currentBlockReference = &treeOp->alternative();
+          treeOp = treeOp->alternative();
+        } else {
+          //matching failed, we'll add the new branch here
+          tailTarget = &treeOp->alternative();
+          matchedCnt = i;
+          goto matching_done;
+        }
+
+        if (treeOp->isCheckFun()) {
+          checkFunOps++;
+          //if there were too many CHECK_FUN alternative operations, put them
+          //into a SEARCH_STRUCT
+          if (checkFunOps > checkFunOpThreshold) {
+            //we put CHECK_FUN ops into the SEARCH_STRUCT op, and
+            //restart with the chain
+            this->template compressCheckOps<CodeTree::SearchStruct::FN_STRUCT>(chainStart);
+            treeOp = chainStart;
+            checkFunOps = 0;
+            checkGroundTermOps = 0;
+            currentBlockReference = chainStartReference;
+            continue;
+          }
+        }
+
+        if (treeOp->isCheckGroundTerm()) {
+          checkGroundTermOps++;
+          //if there were too many CHECK_GROUND_TERM alternative operations, put them
+          //into a SEARCH_STRUCT
+          if (checkGroundTermOps > checkGroundTermOpThreshold) {
+            //we put CHECK_GROUND_TERM ops into the SEARCH_STRUCT op, and
+            //restart with the chain
+            this->template compressCheckOps<CodeTree::SearchStruct::GROUND_TERM_STRUCT>(chainStart);
+            treeOp = chainStart;
+            checkFunOps = 0;
+            checkGroundTermOps = 0;
+            currentBlockReference = chainStartReference;
+            continue;
+          }
+        }
+      } // for(;;)
+
+      if (treeOp->isLitEnd()) {
+        lastMatchedILS = treeOp->getILS();
+        if (!treeOp->getILS()->hasSuccessor) {
+          appendToBlock = true;
+          matchedCnt = i+1;
+          goto matching_done;
+        }
+      }
+
+      //the SEARCH_STRUCT operation does not occur in a CodeBlock
+      ASS(!treeOp->isSearchStruct());
+      ASS(!treeOp->isLitEnd() || treeOp->getILS()->hasSuccessor);
+      //we can safely do increase because as long as we match and something
+      //remains in the @b code stack, we aren't at the end of the CodeBlock
+      //either (as each code block contains at least one FAIL or SUCCESS
+      //operation, and CodeStack contains at most one SUCCESS as the last
+      //operation)
+      treeOp++;
+    }
+    //We matched the whole CodeStack. If we are here, we are inserting an
+    //item multiple times. We will insert it anyway, because later we may
+    //be removing it multiple times as well.
+    matchedCnt = code[clen-1].isSuccess() ? clen - 1 : clen;
+
+    //we need to find where to put it
+    while (treeOp->alternative()) {
+      treeOp = treeOp->alternative();
+    }
+    tailTarget = &treeOp->alternative();
+  }
+matching_done:
+
+  ASS_LE(matchedCnt, clen);
+  RSTAT_MCTR_INC("alt split literal", lastMatchedILS ? (lastMatchedILS->depth+1) : 0);
+
+  CodeTree::CodeBlock* rem = nullptr;
+  if (matchedCnt != clen) {
+    if (appendToBlock) {
+      CodeTree::CodeBlock* oldBlock = currentBlockReference ? CodeTree::firstOpToCodeBlock(*currentBlockReference) : this->_entryPoint;
+      rem = CodeTree::appendBlock(code, clen-matchedCnt, oldBlock);
+      if (currentBlockReference) {
+        *currentBlockReference = &(*rem)[0];
+      } else {
+        this->_entryPoint = rem;
+      }
+    } else {
+      rem=CodeTree::buildBlock(code, clen-matchedCnt, lastMatchedILS);
+      *tailTarget=&(*rem)[0];
+      LOG_OP(rem->toString()<<" incorporated, mismatch caused by "<<code[matchedCnt].toString());
+    }
+  }
+
+  bool setIls = false;
+  if (prev)  {
+    if (rem) {
+      for (unsigned i=rem->length()-1; rem->length() > 0; i--) {
+        if ((*rem)[i].isLitEnd()) {
+          *prev = (*rem)[i].getILS();
+          setIls = true;
+          break;
+        }
+        if (i==0) break;
+      }
+    }
+
+    if (!setIls) {
+      *prev = lastMatchedILS;
+      setIls = true;
+    }
+  }
+
+  //truncate the part that was used and thus does not need disposing
+  code.truncate(matchedCnt);
+  //dispose of the unused code
+  while(code.isNonEmpty()) {
+    if(code.top().isLitEnd()) {
+      delete code.top().getILS();
+    }
+    code.pop();
+  }
 }
 
 //////////////// retrieval ////////////////////
@@ -467,6 +944,193 @@ void ClauseCodeTree<higherOrder>::LiteralMatcher::recordMatch()
 }
 
 
+////////// OptimizedLiteralMatcher
+
+/**
+ * If @b seekOnlySuccess if true, we will look only for immediate SUCCESS operations
+ *  and fail if there isn't any at the beginning (possibly also among alternatives).
+ */
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::init(OptimizedClauseCodeTree* tree_, CodeOp* entry_,
+					  OptimizedLiteralMatcher* prev, LitInfo* linfos_, size_t linfoCnt_,
+					  bool seekOnlySuccess)
+{
+  ASS_G(linfoCnt_,0);
+
+  Base::init(tree_,entry_,linfos_,linfoCnt_);
+
+  _eagerlyMatched=false;
+  eagerResults.reset();
+  earlyResults.reset();
+  futureResults.reset();
+
+  // Pull literal-end matches discovered by the previous optimized matcher
+  // that already belong to this ILS chain.
+  if (!seekOnlySuccess) {
+    depth = prev ? prev->depth+1 : 0;
+    if (prev && prev->futureResults.isNonEmpty()) {
+      Stack<CodeOp*>& prevFutureResults = prev->futureResults;
+      ILStruct* prevIls = prev->getILS();
+      for (size_t i = prevFutureResults.length()-1; ;i--) {
+        ASS(prevFutureResults[i]->isLitEnd());
+        if (prevFutureResults[i]->getILS()->previous == prevIls) {
+          earlyResults.push(prevFutureResults.swapRemove(i));
+        }
+        if (i==0) break;
+      }
+    }
+  }
+
+  RSTAT_CTR_INC("OptimizedLiteralMatcher::init");
+  if(seekOnlySuccess && entry_) {
+    RSTAT_CTR_INC("OptimizedLiteralMatcher::init - seekOnlySuccess");
+    //we are interested only in SUCCESS operations
+    //(and those must be at the entry point or its alternatives)
+
+    _eagerlyMatched=true;
+    Base::fresh=false;
+    CodeOp* sop=Base::entry;
+    while(sop) {
+      if(sop->isSuccess()) {
+        eagerResults.push(sop);
+      }
+      sop=sop->alternative();
+    }
+    return;
+  }
+
+  ALWAYS(Base::prepareLiteral());
+}
+
+/**
+ * Try to find a match, and if one is found, return true
+ */
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::next()
+{
+  if(eagerlyMatched()) {
+    _matched=!eagerResults.isEmpty();
+    if(!_matched) {
+      return false;
+    }
+    op=eagerResults.pop();
+    return true;
+  }
+
+  if (earlyResults.isNonEmpty()) {
+    op = earlyResults.pop();
+    _matched = true;
+    return true;
+  }
+
+  if (fresh) {
+    op = entry;
+  }
+
+  if(finished()) {
+    //all possible matches are exhausted
+    return false;
+  }
+
+  for (;;) {
+    _matched=execute();
+    if(!_matched) {
+      return false;
+    }
+
+    ASS(op->isLitEnd() || op->isSuccess());
+    if(op->isLitEnd()) {
+      recordMatch();
+      if (op->getILS()->depth > depth) {
+        futureResults.push(op);
+      } else {
+        return true;
+      }
+    } else {
+      return true;
+    }
+  }
+}
+
+/**
+ * Perform eager matching and return true iff new matches were found
+ */
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::doEagerMatching()
+{
+  ASS(!eagerlyMatched()); //eager matching can be done only once
+  ASS(eagerResults.isEmpty());
+  ASS(!finished());
+  eagerResults = std::move(earlyResults);
+  
+  if (!entry) {
+    _eagerlyMatched=true;
+    return eagerResults.isNonEmpty();
+  }
+
+  //backup the current op
+  CodeOp* currOp=op;
+
+  static Stack<CodeOp*> eagerResultsRevOrder;
+  static Stack<CodeOp*> successes;
+  eagerResultsRevOrder.reset();
+  successes.reset();
+
+
+  op = entry;
+  while(execute()) {
+    if(op->isLitEnd()) {
+      recordMatch();
+      if (op->getILS()->depth > depth) {
+        futureResults.push(op);
+      } else {
+        eagerResultsRevOrder.push(op);
+      }
+    }
+    else {
+      ASS(op->isSuccess());
+      successes.push(op);
+    }
+  }
+
+  //we want to yield results in the order we found them
+  //(otherwise the subsumption resolution would be preferred to the
+  //subsumption)
+  while(eagerResultsRevOrder.isNonEmpty()) {
+    eagerResults.push(eagerResultsRevOrder.pop());
+  }
+  //we want to yield SUCCESS operations first (as after them there may
+  //be no need for further clause retrieval)
+  while(successes.isNonEmpty()) {
+    eagerResults.push(successes.pop());
+  }
+
+  _eagerlyMatched=true;
+
+  op=currOp; //restore the current op
+
+  return eagerResults.isNonEmpty();
+}
+
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::recordMatch()
+{
+  ASS(_matched);
+
+  ILStruct* ils=op->getILS();
+  ils->ensureFreshness(Base::tree->_curTimeStamp);
+  if(ils->finished) {
+    //no need to record matches which we already know will not lead to anything
+    return;
+  }
+  if(!ils->matchCnt && Base::linfos[Base::curLInfo].opposite) {
+    //if we're matching opposite matches, we have already tried all non-opposite ones
+    ils->noNonOppositeMatches=true;
+  }
+  ils->addMatch(Base::linfos[Base::curLInfo].liIndex, Base::bindings);
+}
+
+
 ////////// ClauseMatcher
 
 /**
@@ -562,6 +1226,7 @@ void ClauseCodeTree<higherOrder>::ClauseMatcher::reset()
 template<bool higherOrder>
 Clause* ClauseCodeTree<higherOrder>::ClauseMatcher::next(int& resolvedQueryLit)
 {
+  TIME_TRACE("Normal clause matcher next")
   if(lms.isEmpty()) {
     return 0;
   }
@@ -934,7 +1599,473 @@ bool ClauseCodeTree<higherOrder>::ClauseMatcher::existsCompatibleMatch(ILStruct*
   return false;
 }
 
+
+////////// OptimizedClauseMatcher
+
+/**
+ * Initialize the OptimizedClauseMatcher to retrieve generalizetions
+ * of the @b query_ clause.
+ * If @b sres_ if true, we perform subsumption resolution
+ */
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::init(OptimizedClauseCodeTree* tree_, Clause* query_, bool sres_)
+{
+  ASS(!tree_->isEmpty());
+
+  query=query_;
+  tree=tree_;
+  sres=sres_;
+  lms.reset();
+
+#if VDEBUG
+  ASS_EQ(tree->_clauseMatcherCounter,0);
+  tree->_clauseMatcherCounter++;
+#endif
+
+  //init LitInfo records
+  unsigned clen=query->length();
+  unsigned baseLICnt=clen;
+  for(unsigned i=0;i<clen;i++) {
+    if((*query)[i]->isEquality()) {
+      baseLICnt++;
+    }
+  }
+  unsigned liCnt=sres ? (baseLICnt*2) : baseLICnt;
+  lInfos.ensure(liCnt);
+
+  //we put ground literals first
+  unsigned liIndex=0;
+  for(unsigned i=0;i<clen;i++) {
+    if(!(*query)[i]->ground()) {
+      continue;
+    }
+    lInfos[liIndex]=LitInfo(query,i);
+    lInfos[liIndex].liIndex=liIndex;
+    liIndex++;
+    if((*query)[i]->isEquality()) {
+      lInfos[liIndex]=LitInfo::getReversed(lInfos[liIndex-1]);
+      lInfos[liIndex].liIndex=liIndex;
+      liIndex++;
+    }
+  }
+  for(unsigned i=0;i<clen;i++) {
+    if((*query)[i]->ground()) {
+      continue;
+    }
+    lInfos[liIndex]=LitInfo(query,i);
+    lInfos[liIndex].liIndex=liIndex;
+    liIndex++;
+    if((*query)[i]->isEquality()) {
+      lInfos[liIndex]=LitInfo::getReversed(lInfos[liIndex-1]);
+      lInfos[liIndex].liIndex=liIndex;
+      liIndex++;
+    }
+  }
+  if(sres) {
+    for(unsigned i=0;i<baseLICnt;i++) {
+      unsigned newIndex=i+baseLICnt;
+      lInfos[newIndex]=LitInfo::getOpposite(lInfos[i]);
+      lInfos[newIndex].liIndex=newIndex;
+    }
+    sresLiteral=sresNoLiteral;
+  }
+
+  tree->incTimeStamp();
+  enterLiteral(tree->getEntryPoint(), clen==0, nullptr);
+}
+
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::reset()
+{
+  unsigned liCnt=lInfos.size();
+  for(unsigned i=0;i<liCnt;i++) {
+    lInfos[i].dispose();
+  }
+  lms.reset();
+
+#if VDEBUG
+  ASS_EQ(tree->_clauseMatcherCounter,1);
+  tree->_clauseMatcherCounter--;
+#endif
+}
+
+/**
+ * Return next clause matching query or 0 if there is not such
+ */
+template<bool higherOrder>
+Clause* OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::next(int& resolvedQueryLit)
+{
+  TIME_TRACE("Optimized clause matcher next")
+  if(lms.isEmpty()) {
+    return 0;
+  }
+
+  for(;;) {
+    OptimizedLiteralMatcher* lm = &*lms.top();
+
+    //get next literal from the literal matcher
+    bool found=lm->next();
+
+    //if there's none, go one level up (or fail if at the top)
+    if(!found) {
+      leaveLiteral();
+      if(lms.isEmpty()) {
+	return 0;
+      }
+    }
+    else if(lm->op->isSuccess()) {
+      Clause* candidate=lm->op->template getSuccessResult<Clause>();
+      RSTAT_MCTR_INC("candidates", lms.size()-1);
+      if(checkCandidate(candidate, resolvedQueryLit)) {
+	RSTAT_MCTR_INC("candidates (success)", lms.size()-1);
+	return candidate;
+      }
+    }
+    else if(canEnterLiteral(lm->op)) {
+      ASS(lm->op->isLitEnd());
+      ASS_LE(lms.size(), query->length()); //this is due to the seekOnlySuccess part below
+
+      bool seekOnlySuccess=lms.size()==query->length();
+      CodeOp* newLitEntry= lm->getILS()->hasSuccessor ? lm->op+1 : nullptr;
+
+      //check that we have cleared the sresLiteral value if it is no longer valid
+      ASS(!sres || sresLiteral==sresNoLiteral || sresLiteral<lms.size()-1);
+
+      if(sres && sresLiteral==sresNoLiteral) {
+	//we check whether we haven't matched only opposite literals on the previous level
+	if(lm->getILS()->noNonOppositeMatches) {
+	  sresLiteral=lms.size()-1;
+	}
+      }
+
+      enterLiteral(newLitEntry, seekOnlySuccess, lm);
+    }
+  }
+}
+
+template<bool higherOrder>
+inline bool OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::canEnterLiteral(CodeOp* op)
+{
+  ASS(op->isLitEnd());
+  ASS_EQ(lms.top()->op, op);
+
+  ILStruct* ils=op->getILS();
+  if(ils->timestamp==tree->_curTimeStamp && ils->visited) {
+    return false;
+  }
+
+  // Always populate futureResults before descending. This is the clause-level
+  // part of the optimized matcher and is intentionally independent of depth.
+  if(!lms.top()->eagerlyMatched()) {
+    lms.top()->doEagerMatching();
+    RSTAT_MST_INC("match count", lms.size()-1, lms.top()->getILS()->matchCnt);
+  }
+
+  //we have already matched and entered some index literals, so we
+  //will check for compatibility of variable assignments
+  for(size_t ilIndex=0;ilIndex<lms.size()-1;ilIndex++) {
+    ILStruct* prevILS=lms[ilIndex]->getILS();
+
+    size_t matchIndex=ils->matchCnt;
+    while(matchIndex!=0) {
+      matchIndex--;
+      MatchInfo* mi=ils->getMatch(matchIndex);
+      if(!existsCompatibleMatch(ils, mi, prevILS)) {
+        ils->deleteMatch(matchIndex); //decreases ils->matchCnt
+      }
+    }
+    if(!ils->matchCnt) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Enter literal matching starting at @c entry.
+ *
+ * @param entry the code tree node
+ * @param seekOnlySuccess if true, accept only SUCCESS operations
+ *   (this is to be used when all literals are matched so we want
+ *   to see just clauses that end at this point).
+ */
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuccess, OptimizedLiteralMatcher* prev)
+{
+  if(!seekOnlySuccess) {
+    RSTAT_MCTR_INC("enterLiteral levels (non-sos)", lms.size());
+  }
+
+  if(lms.isNonEmpty()) {
+    Recycled<OptimizedLiteralMatcher, NoReset>& prevLM = lms.top();
+    ILStruct* ils=prevLM->op->getILS();
+    ASS_EQ(ils->timestamp,tree->_curTimeStamp);
+    ASS(!ils->visited);
+    ASS(!ils->finished);
+    ils->visited=true;
+  }
+
+  size_t linfoCnt=lInfos.size();
+  if(sres && sresLiteral!=sresNoLiteral) {
+    ASS_L(sresLiteral,lms.size());
+    //we do not need to match index literals with opposite query
+    //literals, as one of already matched index literals matched only
+    //to opposite literals (and opposite literals cannot be matched
+    //on more than one index literal)
+    ASS_EQ(linfoCnt%2,0);
+    linfoCnt/=2;
+  }
+
+  Recycled<OptimizedLiteralMatcher, NoReset> lm;
+  lm->init(tree, entry, prev, lInfos.array(), linfoCnt, seekOnlySuccess);
+  lms.push(std::move(lm));
+}
+
+template<bool higherOrder>
+void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::leaveLiteral()
+{
+  ASS(lms.isNonEmpty());
+
+  lms.pop();
+
+  if(lms.isNonEmpty()) {
+    OptimizedLiteralMatcher* prevLM = &*lms.top();
+    ILStruct* ils=prevLM->op->getILS();
+    ASS_EQ(ils->timestamp,tree->_curTimeStamp);
+    ASS(ils->visited);
+
+    ils->finished=true;
+
+    if(sres) {
+      //clear the resolved literal flag if we have backtracked from it
+      unsigned depth=lms.size()-1;
+      if(sresLiteral==depth) {
+        sresLiteral=sresNoLiteral;
+      }
+      ASS(sresLiteral==sresNoLiteral || sresLiteral<depth);
+    }
+  }
+}
+
+
+//////////////// Optimized multi-literal matching
+
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::checkCandidate(Clause* cl, int& resolvedQueryLit)
+{
+  unsigned clen=cl->length();
+  //the last matcher in mls is the one that yielded the SUCCESS operation
+  ASS_EQ(clen, lms.size()-1);
+  ASS_EQ(clen, lms[clen-1]->op->getILS()->depth+1);
+
+  if(clen<=1) {
+    //if clause doesn't have multiple literals, there is no need
+    //for multi-literal matching
+    resolvedQueryLit=-1;
+    if(sres && clen==1) {
+      size_t matchCnt=lms[0]->getILS()->matchCnt;
+      for(size_t i=0;i<matchCnt;i++) {
+	MatchInfo* mi=lms[0]->getILS()->getMatch(i);
+	if(lInfos[mi->liIndex].opposite) {
+	  resolvedQueryLit=lInfos[mi->liIndex].litIndex;
+	}
+	else {
+	  //we prefer subsumption to subsumption resolution
+	  resolvedQueryLit=-1;
+	  break;
+	}
+      }
+    }
+    return true;
+  }
+
+//  if(matchGlobalVars(resolvedQueryLit)) {
+//    return true;
+//  }
+
+  bool newMatches=false;
+  for(int i=clen-1;i>=0;i--) {
+    OptimizedLiteralMatcher* lm = &*lms[i];
+    if(lm->eagerlyMatched()) {
+      break;
+    }
+    if(lm->getILS()->varCnt==0) {
+      //If the index term is ground, at most two literals can be matched on
+      //it (the second one is the opposite one in case we're performing the
+      //subsumption resolution) We are here, so we have matched one already,
+      //and we know that the query clause doesn't contain two equal or opposite
+      //literals (or else it would have been simplified by duplicate literal
+      //removal or by tautology deletion). Therefore we don't need to try
+      //matching the rest of the query clause.
+      continue;
+    }
+    newMatches|=lm->doEagerMatching();
+  }
+  (void)newMatches; // to prevent a warning
+  return matchGlobalVars(resolvedQueryLit);
+//  return newMatches && matchGlobalVars(resolvedQueryLit);
+}
+
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::matchGlobalVars(int& resolvedQueryLit)
+{
+  //TODO: perform _set_, not _multiset_ subsumption for subsumption resolution
+
+//  bool verbose=query->number()==58746;
+//#define VERB_OUT(x) if(verbose) {cout<<x<<endl;}
+
+  unsigned clen=lms.size()-1;
+
+  //remaining[j,0] contains number of matches for j-th index literal
+  //remaining[j,i+1] (for j>i) contains number of matches for j-th
+  //  index literal compatible with the bindings of i-th literal (and
+  //  those before it)
+  //remaining[j,j] therefore contains number of matches we have to try
+  //  when we get to binding j-th literal
+  //  Matches in ILStruct::matches are reordered, so that we always try
+  //  the _first_ remaining[j,j] literals
+  static TriangularArray<int> remaining(10);
+  remaining.setSide(clen);
+  for(unsigned j=0;j<clen;j++) {
+    ILStruct* ils=lms[j]->getILS();
+    remaining.set(j,0,ils->matchCnt);
+
+//    VERB_OUT("matches "<<ils->matches.size()<<" index:"<<j<<" vars:"<<ils->varCnt<<" linfos:"<<lInfos.size());
+//    for(unsigned y=0;y<ils->matches.size();y++) {
+//      LitInfo* linf=&lInfos[ils->matches[y]->liIndex];
+//      VERB_OUT(" match "<<y<<" liIndex:"<<ils->matches[y]->liIndex<<" op: "<<linf->opposite);
+//      VERB_OUT(" hdr: "<<(*linf->ft)[0].number());
+//    }
+//    for(unsigned x=0;x<ils->varCnt;x++) {
+//      VERB_OUT(" glob var: "<<ils->sortedGlobalVarNumbers[x]);
+//      for(unsigned y=0;y<ils->matches.size();y++) {
+//	VERB_OUT(" match "<<y<<" binding: "<<ils->matches[y]->bindings[x]);
+//      }
+//    }
+  }
+//  VERB_OUT("secOp:"<<(lms[1]->op-1)->instr()<<" "<<(lms[1]->op-1)->arg());
+
+  static DArray<int> matchIndex;
+  matchIndex.ensure(clen);
+  unsigned failLev=0;
+  for(unsigned i=0;i<clen;i++) {
+    matchIndex[i]=-1;
+    if(i>0) { failLev=20; }
+  bind_next_match:
+    matchIndex[i]++;
+    if(matchIndex[i]==remaining.get(i,i)) {
+      //no more choices at this level, so try going up
+      if(i==0) {
+	RSTAT_MCTR_INC("zero level fails at", failLev);
+	return false;
+      }
+      i--;
+      goto bind_next_match;
+    }
+    ASS_L(matchIndex[i],remaining.get(i,i));
+
+    ILStruct* bi=lms[i]->getILS(); 		//bound index literal
+    MatchInfo* bq=bi->getMatch(matchIndex[i]);	//bound query literal
+
+    //propagate the implications of this binding to next literals
+    for(unsigned j=i+1;j<clen;j++) {
+      ILStruct* ni=lms[j]->getILS();		//next index literal
+      unsigned rem=remaining.get(j,i);
+      unsigned k=0;
+      while(k<rem) {
+	MatchInfo* nq=ni->getMatch(k);		//next query literal
+	if(!compatible(bi,bq,ni,nq)) {
+	  rem--;
+	  swap(ni->getMatch(k),ni->getMatch(rem));
+	  continue;
+	}
+	k++;
+      }
+      if(rem==0) {
+	if(failLev<j) { failLev=j; }
+	goto bind_next_match;
+      }
+      remaining.set(j,i+1,rem);
+    }
+  }
+
+  resolvedQueryLit=-1;
+  if(sres) {
+    for(unsigned i=0;i<clen;i++) {
+      ILStruct* ils=lms[i]->getILS();
+      MatchInfo* mi=ils->getMatch(matchIndex[i]);
+      if(lInfos[mi->liIndex].opposite) {
+	resolvedQueryLit=lInfos[mi->liIndex].litIndex;
+	break;
+      }
+    }
+  }
+
+  return true;
+}
+
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::compatible(ILStruct* bi, MatchInfo* bq, ILStruct* ni, MatchInfo* nq)
+{
+  if( lInfos[bq->liIndex].litIndex==lInfos[nq->liIndex].litIndex ||
+      (lInfos[bq->liIndex].opposite && lInfos[nq->liIndex].opposite) ) {
+    return false;
+  }
+
+  unsigned bvars=bi->varCnt;
+  unsigned* bgvn=bi->sortedGlobalVarNumbers;
+  TermList* bb=bq->bindings;
+
+  unsigned nvars=ni->varCnt;
+  unsigned* ngvn=ni->sortedGlobalVarNumbers;
+  TermList* nb=nq->bindings;
+
+  while(bvars && nvars) {
+    while(bvars && *bgvn<*ngvn) {
+      bvars--;
+      bgvn++;
+      bb++;
+    }
+    if(!bvars) {
+      break;
+    }
+    while(nvars && *bgvn>*ngvn) {
+      nvars--;
+      ngvn++;
+      nb++;
+    }
+    while(bvars && nvars && *bgvn==*ngvn) {
+      if(*bb!=*nb) {
+	return false;
+      }
+      bvars--;
+      bgvn++;
+      bb++;
+      nvars--;
+      ngvn++;
+      nb++;
+    }
+  }
+
+  return true;
+}
+
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::existsCompatibleMatch(ILStruct* si, MatchInfo* sq, ILStruct* targets)
+{
+  size_t tcnt=targets->matchCnt;
+  for(size_t i=0;i<tcnt;i++) {
+    if(compatible(si,sq,targets,targets->getMatch(i))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 template class ClauseCodeTree<false>;
 template class ClauseCodeTree<true>;
+template class OptimizedClauseCodeTree<false>;
+template class OptimizedClauseCodeTree<true>;
 
 }

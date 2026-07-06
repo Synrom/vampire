@@ -42,7 +42,7 @@ public:
   void insert(Clause* cl);
   void remove(Clause* cl);
 
-private:
+protected:
 
   //////// insertion //////////
 
@@ -146,7 +146,7 @@ public:
     Stack<Recycled<LiteralMatcher, NoReset>> lms;
   };
 
-private:
+protected:
 
   //////// member variables //////////
 
@@ -154,6 +154,127 @@ private:
   unsigned _clauseMatcherCounter;
 #endif
 
+};
+
+template<bool higherOrder>
+class OptimizedClauseCodeTree
+: public ClauseCodeTree<higherOrder>
+{
+  using Base = ClauseCodeTree<higherOrder>;
+  using ILStruct = CodeTree::ILStruct;
+  using CodeOp = CodeTree::CodeOp;
+  using LitInfo = CodeTree::LitInfo;
+  using MatchInfo = CodeTree::MatchInfo;
+
+public:
+  OptimizedClauseCodeTree() : Base() {}
+
+  using Base::incorporate;
+
+  void insert(Clause* cl);
+  void remove(Clause* cl);
+  void incorporate(CodeTree::CodeStack& code, ILStruct** matchedIls);
+
+protected:
+  /** Literal matcher with early/future result forwarding. */
+  struct OptimizedLiteralMatcher
+  : public CodeTree::Matcher</*removing*/false,false,higherOrder>
+  {
+    using Base = CodeTree::Matcher</*removing*/false,false,higherOrder>;
+    using Base::op;
+    using Base::_matched;
+    using Base::execute;
+    using Base::entry;
+    using Base::fresh;
+
+    void init(OptimizedClauseCodeTree* tree, CodeOp* entry_, OptimizedLiteralMatcher* prev, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess=false);
+    bool next();
+    bool doEagerMatching();
+
+    inline bool eagerlyMatched() const { return _eagerlyMatched; }
+    inline bool finished() const { return op == nullptr || Base::finished(); }
+
+    inline ILStruct* getILS() { ASS(Base::matched()); return op->getILS(); }
+
+    USE_ALLOCATOR(OptimizedLiteralMatcher);
+
+  private:
+    bool _eagerlyMatched;
+    unsigned depth;
+
+    Stack<CodeOp*> eagerResults;
+    Stack<CodeOp*> earlyResults;
+    Stack<CodeOp*> futureResults;
+
+    void recordMatch();
+  };
+
+public:
+  struct OptimizedClauseMatcher
+  {
+    void init(OptimizedClauseCodeTree* tree_, Clause* query_, bool sres_);
+    void reset();
+    bool keepRecycled() const { return lInfos.keepRecycled(); }
+
+    Clause* next(int& resolvedQueryLit);
+
+    bool matched() { return lms.isNonEmpty() && lms.top()->success(); }
+    CodeOp* getSuccessOp() { ASS(matched()); return lms.top()->op; }
+
+    USE_ALLOCATOR(OptimizedClauseMatcher);
+
+  private:
+    void enterLiteral(CodeOp* entry, bool seekOnlySuccess, OptimizedLiteralMatcher* prev);
+    void leaveLiteral();
+    bool canEnterLiteral(CodeOp* op);
+
+    bool checkCandidate(Clause* cl, int& resolvedQueryLit);
+    bool matchGlobalVars(int& resolvedQueryLit);
+    bool compatible(ILStruct* bi, MatchInfo* bq, ILStruct* ni, MatchInfo* nq);
+
+    bool existsCompatibleMatch(ILStruct* si, MatchInfo* sq, ILStruct* oi);
+
+    Clause* query;
+    OptimizedClauseCodeTree* tree;
+    bool sres;
+
+    static const unsigned sresNoLiteral=static_cast<unsigned>(-1);
+    unsigned sresLiteral;
+
+    /**
+     * Literal infos that we will attempt to match
+     * For each equality we add two lit infos, once with reversed arguments.
+     * The order of infos is:
+     *
+     * Ground literals
+     * Non-ground literals
+     * [if sres] Ground literals negated
+     * [if sres] Non-ground literals negated
+     */
+    DArray<LitInfo> lInfos;
+
+    Stack<Recycled<OptimizedLiteralMatcher, NoReset>> lms;
+  };
+
+protected:
+  void optimizeLiteralOrder(DArray<Literal*>& lits);
+  size_t evalSharingBetweenLiterals(Literal* lit1, Literal* lit2);
+
+  struct OptimizedRemovingLiteralMatcher
+  : public CodeTree::Matcher</*removing*/true,false,higherOrder>
+  {
+    using MatcherBase = CodeTree::Matcher</*removing*/true,false,higherOrder>;
+    using MatcherBase::entry;
+
+    void init(CodeTree::CodeOp* entry_, CodeTree::CodeOp* lastEntry, CodeTree::LitInfo* linfos_, size_t linfoCnt_,
+      OptimizedClauseCodeTree* tree_, Stack<CodeTree::CodeOp*>* firstsInBlocks_);
+    bool execute();
+
+    USE_ALLOCATOR(OptimizedRemovingLiteralMatcher);
+
+  private:
+    CodeTree::CodeOp* secondEntry;
+  };
 };
 
 

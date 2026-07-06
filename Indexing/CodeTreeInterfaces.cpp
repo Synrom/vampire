@@ -177,10 +177,14 @@ void CodeTreeSubsumptionIndex<higherOrder>::handleClause(Clause* cl, bool adding
   TIME_TRACE("codetree subsumption index maintenance");
 
   if(adding) {
+    std::cout << "wtree.insert(clause({" << cl->toReproducerString() << "}));" << std::endl;
     _ct.insert(cl);
+    _optimizedCt.insert(cl);
   }
   else {
+    std::cout << "wtree.remove(clause({" << cl->toReproducerString() << "}));" << std::endl;
     _ct.remove(cl);
+    _optimizedCt.remove(cl);
   }
 }
 

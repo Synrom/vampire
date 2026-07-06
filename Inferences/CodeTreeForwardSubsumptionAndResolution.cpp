@@ -23,50 +23,86 @@ template<bool higherOrder>
 CodeTreeForwardSubsumptionAndResolution<higherOrder>::CodeTreeForwardSubsumptionAndResolution(SaturationAlgorithm& salg)
   : _subsumptionResolution(salg.getOptions().forwardSubsumptionResolution()),
     _index(salg.getSimplifyingIndex<CodeTreeSubsumptionIndex<higherOrder>>()),
-    _ct(_index->getClauseCodeTree())
+    _ct(_index->getClauseCodeTree()),
+    _optimizedCt(_index->getOptimizedClauseCodeTree())
 {}
 
 template<bool higherOrder>
 bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, Clause *&replacement, ClauseIterator &premises)
 {
+  ASS_EQ(_ct->isEmpty(), _optimizedCt->isEmpty());
   if (_ct->isEmpty()) {
     return false;
   }
 
-  static typename ClauseCodeTree<higherOrder>::ClauseMatcher cm;
+  static typename ClauseCodeTree<higherOrder>::ClauseMatcher oldCm;
+  static typename OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher optimizedCm;
 
-  cm.init(_ct, cl, _subsumptionResolution);
+  oldCm.init(_ct, cl, _subsumptionResolution);
+  optimizedCm.init(_optimizedCt, cl, _subsumptionResolution);
 
-  Clause* premise;
-  int resolvedQueryLit;
+  Clause* premise = 0;
+  int resolvedQueryLit = -1;
 
-  while ((premise = cm.next(resolvedQueryLit))) {
-    if (resolvedQueryLit == -1) {
-      ASS(satSubs.checkSubsumption(premise, cl));
-      premises = pvi(getSingletonIterator(premise));
-      env.statistics->forwardSubsumed++;
-      cm.reset();
-      return true;
-    }
-    ASS(satSubs.checkSubsumptionResolutionWithLiteral(premise, cl, resolvedQueryLit));
+  static Stack<Clause*> oldResults;
+  static Stack<Clause*> optimizedResults;
+  oldResults.reset();
+  optimizedResults.reset();
 
-    LiteralStack res;
-    for (unsigned i = 0; i < cl->length(); i++) {
-      if (i == (unsigned)resolvedQueryLit) {
-        continue;
+  //std::cout << "Run on " << cl->toReproducerString() << std::endl;
+
+  {
+    Clause* c;
+    int rql;
+    while ((c = oldCm.next(rql))) {
+      if (!premise) {
+        premise = c;
+        resolvedQueryLit = rql;
       }
-      res.push((*cl)[i]);
+      oldResults.push(c);
     }
-    replacement = Clause::fromStack(res, SimplifyingInference2(InferenceRule::FORWARD_SUBSUMPTION_RESOLUTION, cl, premise));
-    if(env.options->proofExtra() == Options::ProofExtra::FULL)
-      env.proofExtra.insert(replacement, new LiteralInferenceExtra((*cl)[resolvedQueryLit]));
-    premises = pvi(getSingletonIterator(premise));
-    cm.reset();
-    return true;
+    while ((c = optimizedCm.next(rql))) {
+      optimizedResults.push(c);
+    }
+  }
+  for (Clause* c : oldResults) {
+    bool found = false;
+    for (Clause* opt : optimizedResults) {
+      if (opt == c) {
+        found = true;
+        break;
+      }
+    }
+    ASS_REP(found, c->toString());
   }
 
-  cm.reset();
-  return false;
+  oldCm.reset();
+  optimizedCm.reset();
+
+  if (!premise) {
+    return false;
+  }
+
+  if (resolvedQueryLit == -1) {
+    ASS(satSubs.checkSubsumption(premise, cl));
+    premises = pvi(getSingletonIterator(premise));
+    env.statistics->forwardSubsumed++;
+    return true;
+  }
+  ASS(satSubs.checkSubsumptionResolutionWithLiteral(premise, cl, resolvedQueryLit));
+
+  LiteralStack res;
+  for (unsigned i = 0; i < cl->length(); i++) {
+    if (i == (unsigned)resolvedQueryLit) {
+      continue;
+    }
+    res.push((*cl)[i]);
+  }
+  replacement = Clause::fromStack(res, SimplifyingInference2(InferenceRule::FORWARD_SUBSUMPTION_RESOLUTION, cl, premise));
+  if(env.options->proofExtra() == Options::ProofExtra::FULL)
+    env.proofExtra.insert(replacement, new LiteralInferenceExtra((*cl)[resolvedQueryLit]));
+  premises = pvi(getSingletonIterator(premise));
+  return true;
 }
 
 template class CodeTreeForwardSubsumptionAndResolution<false>;

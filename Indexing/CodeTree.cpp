@@ -146,7 +146,9 @@ void CodeTree::MatchInfo::init(ILStruct* ils, unsigned liIndex_, DArray<TermList
 
 
 CodeTree::ILStruct::ILStruct(const Literal* lit, unsigned varCnt, Stack<unsigned>& gvnStack)
-: varCnt(varCnt), sortedGlobalVarNumbers(0), globalVarPermutation(0), timestamp(0)
+: depth(0), previous(0), varCnt(varCnt), globalVarNumbers(0),
+  sortedGlobalVarNumbers(0), globalVarPermutation(0), timestamp(0),
+  matchCnt(0), visited(false), finished(false), noNonOppositeMatches(false)
 {
   ASS_EQ(matches.size(), 0); //we don't want any uninitialized pointers in the array
 
@@ -158,6 +160,47 @@ CodeTree::ILStruct::ILStruct(const Literal* lit, unsigned varCnt, Stack<unsigned
   }
   else {
     globalVarNumbers=0;
+  }
+}
+
+CodeTree::ILStruct::ILStruct(const ILStruct& o)
+: depth(o.depth), previous(o.previous), varCnt(o.varCnt), globalVarNumbers(0),
+  sortedGlobalVarNumbers(0), hasSuccessor(o.hasSuccessor),
+  globalVarPermutation(0), timestamp(o.timestamp), matchCnt(o.matchCnt),
+  visited(o.visited), finished(o.finished),
+  noNonOppositeMatches(o.noNonOppositeMatches)
+{
+  if(varCnt) {
+    size_t gvSize=sizeof(unsigned)*varCnt;
+    ASS(o.globalVarNumbers);
+    globalVarNumbers=static_cast<unsigned*>(
+      ALLOC_KNOWN(gvSize, "CodeTree::ILStruct::globalVarNumbers"));
+    memcpy(globalVarNumbers, o.globalVarNumbers, gvSize);
+
+    if(o.sortedGlobalVarNumbers) {
+      sortedGlobalVarNumbers=static_cast<unsigned*>(
+        ALLOC_KNOWN(gvSize, "CodeTree::ILStruct::sortedGlobalVarNumbers"));
+      memcpy(sortedGlobalVarNumbers, o.sortedGlobalVarNumbers, gvSize);
+    }
+    if(o.globalVarPermutation) {
+      globalVarPermutation=static_cast<unsigned*>(
+        ALLOC_KNOWN(gvSize, "CodeTree::ILStruct::globalVarPermutation"));
+      memcpy(globalVarPermutation, o.globalVarPermutation, gvSize);
+    }
+  }
+
+  matches.expand(o.matches.size());
+  size_t msize=matches.size();
+  for(size_t i=0;i<msize;i++) {
+    matches[i]=0;
+    if(!o.matches[i]) {
+      continue;
+    }
+    matches[i]=MatchInfo::alloc(varCnt);
+    matches[i]->liIndex=o.matches[i]->liIndex;
+    for(unsigned b=0;b<varCnt;b++) {
+      matches[i]->bindings[b]=o.matches[i]->bindings[b];
+    }
   }
 }
 
@@ -208,8 +251,13 @@ struct CodeTree::ILStruct::GVArrComparator
  */
 void CodeTree::ILStruct::putIntoSequence(ILStruct* previous_)
 {
+  if (previous) { return; } // needed for alternative next ops insertion
   previous=previous_;
   depth=previous ? (previous->depth+1) : 0;
+
+  if (previous) {
+    previous->nrChildren++;
+  }
 
   if(!varCnt) { return; }
 
@@ -243,6 +291,18 @@ bool CodeTree::ILStruct::equalsForOpMatching(const ILStruct& o) const
   if(varCnt!=o.varCnt) {
     return false;
   }
+
+  // This is needed for future alternative ops
+  if (previous) {
+    if (previous != o.previous) {
+      return false;
+    }
+  }
+
+  if (depth != o.depth) {
+    return false;
+  }
+
   // avoids passing nullptr to memcmp below,
   // which is technically UB
   if(!varCnt)
@@ -402,7 +462,7 @@ void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litSt
       }
       break;
     case CodeTree::LIT_END:
-      out << GREEN << "lit end" << CRESET;
+      out << GREEN << "lit end" << CRESET << " depth=" << op.getILS()->depth << " hasSuccessor=" << op.getILS()->hasSuccessor << " nrChildren=" << op.getILS()->nrChildren;
       break;
     case CodeTree::CHECK_GROUND_TERM:
       out << YELLOW << "ground " << CRESET << *op.getTargetTerm();
@@ -1079,6 +1139,7 @@ CodeTree::CodeBlock* CodeTree::buildBlock(CodeStack& code, size_t cnt, ILStruct*
 {
   size_t clen=code.length();
   ASS_LE(cnt,clen);
+  if (!cnt) return nullptr;
 
   CodeBlock* res=CodeBlock::allocate(cnt);
   size_t sOfs=clen-cnt;
@@ -1088,10 +1149,55 @@ CodeTree::CodeBlock* CodeTree::buildBlock(CodeStack& code, size_t cnt, ILStruct*
     if(op.isLitEnd()) {
       ILStruct* ils=op.getILS();
       ils->putIntoSequence(prev);
+      ils->hasSuccessor = i < cnt-1;
       prev=ils;
     }
     (*res)[i]=op;
   }
+  return res;
+}
+
+/**
+ * Build CodeBlock object from the last @b cnt instructions on the
+ * @b code stack appending them to oldBlock.
+ *
+ * In this function is also set the value for the @b ILStruct::previous
+ * members.
+ * This functions also frees oldBlock.
+ */
+CodeTree::CodeBlock* CodeTree::appendBlock(CodeStack& code, size_t cnt, CodeBlock* oldBlock)
+{
+  if (cnt == 0) {
+    return oldBlock;
+  }
+  size_t clen=code.length();
+  ASS_LE(cnt,clen);
+
+  CodeBlock* res=CodeBlock::allocate(cnt + oldBlock->length());
+
+  ILStruct* prev = nullptr;
+  for (size_t i=0; i < oldBlock->length(); i++) {
+    (*res)[i] = (*oldBlock)[i];
+    if ((*res)[i].isLitEnd()) {
+      prev = (*res)[i].getILS();
+      prev->hasSuccessor = true;
+    }
+  }
+
+  size_t sOfs=clen-cnt;
+  size_t lOfs=oldBlock->length();
+  for(size_t i=0;i<cnt;i++) {
+    CodeOp& op=code[i+sOfs];
+    ASS_EQ(op.alternative(),0); //the ops should not have an alternative set yet
+    if(op.isLitEnd()) {
+      ILStruct* ils=op.getILS();
+      ils->putIntoSequence(prev);
+      ils->hasSuccessor = i < cnt-1;
+      prev=ils;
+    }
+    (*res)[i+lOfs]=op;
+  }
+  oldBlock->deallocate();
   return res;
 }
 
@@ -1326,12 +1432,12 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
     ASS_LE(firstOp, op);
     ASS_G(firstOp+firstOpToCodeBlock(firstOp)->length(), op);
 
-    while(op>firstOp && !op->alternative()) { ASS(!op->isSuccess()); op--; }
+    while(op>firstOp && !op->alternative() && (!op->isLitEnd() || !op->getILS()->nrChildren)) { ASS(!op->isSuccess()); op--; }
 
     ASS(!op->isSuccess());
 
     if(op!=firstOp) {
-      ASS(op->alternative());
+      ASS(op->alternative() || op->isLitEnd());
       //we only change the instruction, the alternative must remain unchanged
       op->makeFail();
       return;
@@ -1357,6 +1463,7 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
       size_t cbLen=cb->length();
       for(size_t i=0;i<cbLen;i++) {
         if((*cb)[i].isLitEnd()) {
+          ASS_EQ((*cb)[i].getILS()->nrChildren, 0);
           delete (*cb)[i].getILS();
         }
       }
@@ -1418,13 +1525,29 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
 
     CodeOp* prevAfterLastOp=prevFirstOp+pcb->length();
     CodeOp* prevOp=prevFirstOp;
-    while(prevOp->alternative()!=firstOp) {
-      ASS_L(prevOp,prevAfterLastOp);
+    while(prevOp->alternative()!=firstOp && prevOp < prevAfterLastOp) {
       prevOp++;
     }
+
+    if (prevOp == prevAfterLastOp) {
+      prevOp--;
+      while (!prevOp->isLitEnd()) {
+        prevOp--;
+      }
+      ASS(prevOp->isLitEnd());
+    }
+
     pointingOp=prevOp;
 
-    pointingOp->setAlternative(alt);
+    if (pointingOp->alternative() == firstOp) {
+      pointingOp->setAlternative(alt);
+    } else {
+      ASS(pointingOp->isLitEnd());
+      if (pointingOp->getILS()->nrChildren) {
+        return;
+      }
+    }
+
     if(pointingOp->isSuccess()) {
       return;
     }
@@ -1433,7 +1556,7 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
     while(prevOp!=prevAfterLastOp) {
       ASS_NEQ(prevOp->alternative(),firstOp);
 
-      if(prevOp->alternative() || prevOp->isSuccess()) {
+      if(prevOp->alternative() || prevOp->isSuccess() || (prevOp->isLitEnd() && prevOp->getILS()->nrChildren)) {
         //there is an operation after the pointingOp that cannot be lost
         return;
       }

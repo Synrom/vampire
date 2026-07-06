@@ -8,6 +8,8 @@
  * and in the source directory
  */
 
+#include <chrono>
+
 #include "Test/SyntaxSugar.hpp"
 #include "Inferences/CodeTreeForwardSubsumptionAndResolution.hpp"
 #include "Inferences/BackwardSubsumptionAndResolution.hpp"
@@ -323,5 +325,116 @@ TEST_SIMPLIFICATION(neg_sub_res_test12,
     .expected({ /* nothing */ })
     .justifications({ /* nothing */ })
 )
+
+TEST_FUN(TestAlternativeNextTimingBestCase)
+{
+  MY_SYNTAX_SUGAR
+
+  // Good example:
+  // C1 = {p2(x1,x2), p2(x1,c)}
+  // C2 = {p2(x1,x2), p2(c,d)}
+  // D = {p(c,e), p(c,c)}
+
+  // unoptimized
+  Kernel::Clause* C1 = clause({p2(x1,x2), p2(x1,c)});
+  Kernel::Clause* C2 = clause({p2(x1,x2), p2(c,d)});
+  Kernel::Clause* D = clause({p2(c,e), p2(c,c)});
+  int resolvedQueryLit;
+  Kernel::Clause* premise;
+
+  ClauseCodeTree<false> normal_tree;
+  normal_tree.insert(C1);
+  normal_tree.insert(C2);
+  std::cout << "Normal tree" << std::endl << normal_tree << std::endl;
+
+  ClauseCodeTree<false>::ClauseMatcher m;
+  m.init(&normal_tree, D, false);
+  auto normalNextStart = std::chrono::steady_clock::now();
+  premise = m.next(resolvedQueryLit);
+  auto normalNextEnd = std::chrono::steady_clock::now();
+  ASS_EQ(resolvedQueryLit, -1);
+  ASS_EQ(premise, C1);
+
+  OptimizedClauseCodeTree<false> parallel_tree;
+  parallel_tree.insert(C1);
+  parallel_tree.insert(C2);
+  std::cout << "Parallel tree" << std::endl << parallel_tree << std::endl;
+
+  OptimizedClauseCodeTree<false>::OptimizedClauseMatcher om;
+  om.init(&parallel_tree, D, false);
+  auto optimizedNextStart = std::chrono::steady_clock::now();
+  premise = om.next(resolvedQueryLit);
+  auto optimizedNextEnd = std::chrono::steady_clock::now();
+  ASS_EQ(resolvedQueryLit, -1);
+  ASS_EQ(premise, C1);
+
+  auto normalNextNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      normalNextEnd - normalNextStart).count();
+  auto optimizedNextNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      optimizedNextEnd - optimizedNextStart).count();
+  std::cout << "next() timings" << std::endl
+            << "  normal:    " << normalNextNs << " ns" << std::endl
+            << "  optimized: " << optimizedNextNs << " ns" << std::endl;
+  if(optimizedNextNs) {
+    std::cout << "  normal / optimized: "
+              << static_cast<double>(normalNextNs)/optimizedNextNs << std::endl;
+  }
+}
+
+TEST_FUN(TestAlternativeNextTimingWorstCase)
+{
+  MY_SYNTAX_SUGAR
+
+  // Bad example:
+  // C1 = {p2(x1,c), p2(x1,d)}
+  // C2 = {p2(x1,x2), p2(c,d)}
+  // D = {p(c,d), p(c,d)}
+
+  // unoptimized
+  Kernel::Clause* C1 = clause({p2(x1,c), p2(x1,d)});
+  Kernel::Clause* C2 = clause({p2(x1,x2), p2(c,d)});
+  Kernel::Clause* D = clause({p2(c,d), p2(c,d)});
+  int resolvedQueryLit;
+  Kernel::Clause* premise;
+  
+  OptimizedClauseCodeTree<false> parallel_tree;
+  parallel_tree.insert(C1); // we only insert C3 such that the LIT_END has a successor op (that will never be reached in this case, in later cases, this will no be the case anymore)
+  parallel_tree.insert(C2);
+  std::cout << "Parallel tree" << std::endl << parallel_tree << std::endl;
+
+  OptimizedClauseCodeTree<false>::OptimizedClauseMatcher om;
+  om.init(&parallel_tree, D, false);
+  auto optimizedNextStart = std::chrono::steady_clock::now();
+  premise = om.next(resolvedQueryLit);
+  auto optimizedNextEnd = std::chrono::steady_clock::now();
+  ASS_EQ(resolvedQueryLit, -1);
+  ASS_EQ(premise, C2);
+
+
+  ClauseCodeTree<false> normal_tree;
+  normal_tree.insert(C1);
+  normal_tree.insert(C2);
+  std::cout << "Normal tree" << std::endl << normal_tree << std::endl;
+
+  ClauseCodeTree<false>::ClauseMatcher m;
+  m.init(&normal_tree, D, false);
+  auto normalNextStart = std::chrono::steady_clock::now();
+  premise = m.next(resolvedQueryLit);
+  auto normalNextEnd = std::chrono::steady_clock::now();
+  ASS_EQ(resolvedQueryLit, -1);
+  ASS_EQ(premise, C2);
+
+    auto normalNextNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      normalNextEnd - normalNextStart).count();
+  auto optimizedNextNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      optimizedNextEnd - optimizedNextStart).count();
+  std::cout << "next() timings" << std::endl
+            << "  normal:    " << normalNextNs << " ns" << std::endl
+            << "  optimized: " << optimizedNextNs << " ns" << std::endl;
+  if(optimizedNextNs) {
+    std::cout << "  normal / optimized: "
+              << static_cast<double>(normalNextNs)/optimizedNextNs << std::endl;
+  }
+}
 
 }

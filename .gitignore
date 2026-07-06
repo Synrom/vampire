@@ -1,6 +1,9 @@
 # ignore common build directories
 /cmake-build
 /build
+/build*
+/output
+/profiles
 /coverage-build
 
 # ignore TPTP directories/symlinks at the top level

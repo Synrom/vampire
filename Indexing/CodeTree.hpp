@@ -103,6 +103,7 @@ public:
   struct alignas(8) ILStruct
   {
     ILStruct(const Literal* lit, unsigned varCnt, Stack<unsigned>& gvnStack);
+    ILStruct(const ILStruct& o);
     ~ILStruct();
     void putIntoSequence(ILStruct* previous_);
 
@@ -115,13 +116,16 @@ public:
     struct GVArrComparator;
 
     unsigned depth;
-    ILStruct* previous;
+    ILStruct* previous = nullptr;
 
     unsigned varCnt;
 
     unsigned* globalVarNumbers;
 
     unsigned* sortedGlobalVarNumbers;
+
+    unsigned nrChildren = 0;
+    bool hasSuccessor = false;
 
     /** Permutation that should be applied to bindings so that they will
      *  correspond to the sortedGlobalVarNumbers */
@@ -478,6 +482,7 @@ public:
   using TermCompiler = Compiler<false>;
 
   static CodeBlock* buildBlock(CodeStack& code, size_t cnt, ILStruct* prev);
+  static CodeBlock* appendBlock(CodeStack& code, size_t cnt, CodeBlock* oldBlock);
   void incorporate(CodeStack& code);
 
   template<SearchStruct::Kind k>
