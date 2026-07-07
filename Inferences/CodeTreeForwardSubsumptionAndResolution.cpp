@@ -51,6 +51,12 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
 
   //std::cout << "Run on " << cl->toReproducerString() << std::endl;
 
+  premise = oldCm.next(resolvedQueryLit);
+  std::cout << premise << std::endl;
+  premise = optimizedCm.next(resolvedQueryLit);
+
+
+  /*
   {
     Clause* c;
     int rql;
@@ -75,6 +81,7 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
     }
     ASS_REP(found, c->toString());
   }
+  */
 
   oldCm.reset();
   optimizedCm.reset();

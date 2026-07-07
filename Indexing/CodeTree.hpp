@@ -126,6 +126,10 @@ public:
 
     unsigned nrChildren = 0;
     bool hasSuccessor = false;
+    /** true if some later literal's code was merged behind this literal end
+     * as an alternative branch (see OptimizedClauseCodeTree::insert), so
+     * matches of the next literal can appear in this literal's subtree */
+    bool hasMergedAlt = false;
 
     /** Permutation that should be applied to bindings so that they will
      *  correspond to the sortedGlobalVarNumbers */

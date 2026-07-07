@@ -166,6 +166,7 @@ CodeTree::ILStruct::ILStruct(const Literal* lit, unsigned varCnt, Stack<unsigned
 CodeTree::ILStruct::ILStruct(const ILStruct& o)
 : depth(o.depth), previous(o.previous), varCnt(o.varCnt), globalVarNumbers(0),
   sortedGlobalVarNumbers(0), hasSuccessor(o.hasSuccessor),
+  hasMergedAlt(o.hasMergedAlt),
   globalVarPermutation(0), timestamp(o.timestamp), matchCnt(o.matchCnt),
   visited(o.visited), finished(o.finished),
   noNonOppositeMatches(o.noNonOppositeMatches)

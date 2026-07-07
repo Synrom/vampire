@@ -200,12 +200,34 @@ protected:
 
   private:
     bool _eagerlyMatched;
+    /** the code of this literal's own entry has been executed to exhaustion */
+    bool _ownExhausted;
     unsigned depth;
 
+    /** The matcher of the previous literal, in case matches of this literal
+     * can be discovered inside merged alternative branches of its code
+     * (hasMergedAlt); such matches are pulled from it on demand. */
+    OptimizedLiteralMatcher* prevMatcher;
+    /** The lit end of prevMatcher we descended from; only matches whose
+     * ILStruct directly follows it belong to this matcher. */
+    ILStruct* prevIls;
+
+    /** Matches ready to be yielded: buffered by pullFromPrev of the next
+     * matcher and, once _eagerlyMatched, all remaining matches of this
+     * matcher. Consumed as a FIFO via eagerNext so that eager matching can
+     * push in discovery order without re-copying. */
     Stack<CodeOp*> eagerResults;
-    Stack<CodeOp*> earlyResults;
+    size_t eagerNext;
+    /** SUCCESS ops found during eager matching or buffered by pullFromPrev
+     * of the next matcher; yielded before eagerResults as after them there
+     * may be no need for further clause retrieval. */
+    Stack<CodeOp*> successResults;
+    /** Lit ends of later literals (merged alternative branches) encountered
+     * while executing this literal's code; pulled by the next matcher. */
     Stack<CodeOp*> futureResults;
 
+    bool advance();
+    bool pullFromPrev();
     void recordMatch();
   };
 
@@ -257,6 +279,12 @@ public:
   };
 
 protected:
+  /** Minimal weight of shared prefix ops (see mergeOpWeight) between
+   * consecutive literals for the next literal's code to be merged behind the
+   * previous literal end as an alternative branch (and for reordering
+   * literals to enable such merges). */
+  static const unsigned nextLitAlternativeThreshold = 6;
+
   void optimizeLiteralOrder(DArray<Literal*>& lits);
   size_t evalSharingBetweenLiterals(Literal* lit1, Literal* lit2);
 
