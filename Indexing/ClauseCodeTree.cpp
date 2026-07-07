@@ -399,7 +399,7 @@ void OptimizedClauseCodeTree<higherOrder>::Incorporator::MatchedBlock::appendBlo
         continue;
       }
       if (treeOp->isNext()) {
-        if (nextOpPathIdx < nextOpPath.length() && treeOp->_arg() == nextOpPath[nextOpPathIdx].index) {
+        if (nextOpPathIdx < nextOpPath.length() && treeOp->_arg() == nextOpPath[nextOpPathIdx].index && *nextOpPath[nextOpPathIdx].reference == matchedPath[pathIdx]) {
           ASS(pathIdx < matchedPath.length());
           NextOpRecord nextEntry = nextOpPath[nextOpPathIdx];
           ASS_EQ(matchedPath[pathIdx], *nextEntry.reference);
@@ -1232,8 +1232,8 @@ void OptimizedClauseCodeTree<higherOrder>::remove(Clause* cl)
         rlms->top()->doEagerMatching();
         ils = rlms->top()->op->getILS();
         for (Bin &bin: ils->nextBinIndices) {
-          for (RecordedCheckPoint cp : rlms->top()->nextBins[bin.index]) {
-            checkpoints.push(cp.toCheckpoint(bin.entry, *(rlms->top()->firstsInBlocks)));
+          for (RecordedCheckPoint& cp : rlms->top()->nextBins[bin.index]) {
+            checkpoints.push(cp.toCheckpoint(rlms->top()->cpBindingPool, bin.entry, *(rlms->top()->firstsInBlocks)));
           }
         }
       }
@@ -1243,7 +1243,7 @@ void OptimizedClauseCodeTree<higherOrder>::remove(Clause* cl)
       } else {
         newLitEntry = getEntryPoint();
       }
-      rlm->init(newLitEntry, lInfos.array(), lInfos.size(), this, &*firstsInBlocks, ils ? ils->reachedByNextOp() : false, std::move(checkpoints), ils ? ils->nextBinCnt : nextBinCnt); // init it
+      rlm->init(newLitEntry, lInfos.array(), lInfos.size(), this, &*firstsInBlocks, std::move(checkpoints), ils ? ils->nextBinCnt : nextBinCnt); // init it
       rlms->push(std::move(rrlm)); // store it in rlms (along with the obligation to return to recycling when no longer used)
     }
 
@@ -1341,9 +1341,9 @@ void ClauseCodeTree<higherOrder>::RemovingLiteralMatcher::doEagerMatching()
 
 template<bool higherOrder>
 void ClauseCodeTree<higherOrder>::RemovingLiteralMatcher::init(CodeOp* entry_, LitInfo* linfos_,
-    size_t linfoCnt_, ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_, bool reachedByNext_, Stack<CheckPoint>&& checkpoints_, unsigned nrNextBins)
+    size_t linfoCnt_, ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_, Stack<CheckPoint>&& checkpoints_, unsigned nrNextBins)
 {
-  Base::init(tree_, entry_, linfos_, linfoCnt_, firstsInBlocks_, reachedByNext_, std::move(checkpoints_), nrNextBins);
+  Base::init(tree_, entry_, linfos_, linfoCnt_, firstsInBlocks_, std::move(checkpoints_), nrNextBins);
   eagerResults.reset();
   eagerResultsFirstInBlocks.reset();
   _eagerlyMatched = false;
@@ -1612,12 +1612,16 @@ void OptimizedClauseCodeTree<higherOrder>::optimizeMemoryAfterRemoval(Stack<Code
 template<bool higherOrder>
 void ClauseCodeTree<higherOrder>::LiteralMatcher::init(CodeTree* tree_, CodeOp* entry_,
 					  LitInfo* linfos_, size_t linfoCnt_,
-					  bool seekOnlySuccess, bool reachedByNext_, 
-            Stack<typename ClauseCodeTree<higherOrder>::LiteralMatcher::CheckPoint>&& checkpoints_, unsigned nrNextBins)
+					  bool seekOnlySuccess,
+            const Stack<CodeTree::ILStruct::Bin>* lazyBins_,
+            const typename ClauseCodeTree<higherOrder>::LiteralMatcher::Base* lazySource_,
+            unsigned nrNextBins)
 {
   ASS_G(linfoCnt_,0);
 
-  Base::init(tree_,entry_,linfos_,linfoCnt_, 0, reachedByNext_, std::move(checkpoints_), nrNextBins);
+  Base::init(tree_,entry_,linfos_,linfoCnt_, 0, Stack<CheckPoint>(), nrNextBins);
+  Base::lazyBins = lazyBins_;
+  Base::lazySource = lazySource_;
 
   _eagerlyMatched=false;
   eagerResults.reset();
@@ -2105,7 +2109,7 @@ void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::init(Optimize
   }
 
   tree->incTimeStamp();
-  enterLiteral(tree->getEntryPoint(), clen==0, tree->nextBinCnt, false, Stack<CheckPoint>());
+  enterLiteral(tree->getEntryPoint(), clen==0, nullptr);
 }
 
 template<bool higherOrder>
@@ -2229,13 +2233,7 @@ Clause* OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::next(int& 
       }
 
       bool seekOnlySuccess=lms.size()==query->length();
-      Stack<CheckPoint> checkpoints;
-      for (Bin &bin: ils->nextBinIndices) {
-        for (RecordedCheckPoint cp : lms.top()->nextBins[bin.index]) {
-          checkpoints.push(cp.toCheckpoint(bin.entry));
-        }
-      }
-      enterLiteral(newLitEntry, seekOnlySuccess, ils->nextBinCnt, ils->reachedByNextOp(), std::move(checkpoints));
+      enterLiteral(newLitEntry, seekOnlySuccess, ils);
     }
   }
 }
@@ -2294,28 +2292,58 @@ inline bool OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::canEnt
   if(ils->timestamp==tree->_curTimeStamp && ils->visited) {
     return false;
   }
-  if (ils->reachedByNextOp() && !op->hasSuccessor()) {
-    bool empty = true;
-    for (Bin bin: ils->nextBinIndices) {
-      if (lms.top()->nextBins[bin.index].isNonEmpty()) {
-        empty = false;
-        break;
+
+  if(lms.size()==query->length()) {
+    //the literal matcher entered after this LIT_END will only seek SUCCESS
+    //operations at its successor; the checkpoint continuations in the bins
+    //always lead to further LIT_ENDs first, so the bins are irrelevant here
+    //and there is no need to force eager matching for their completeness
+    if(!ils->hasSuccessor) {
+      //there is nothing to enter; mark the literal as finished so that
+      //further matches of it are not even recorded
+      ils->visited=true;
+      ils->finished=true;
+      return false;
+    }
+  }
+  else if(ils->reachedByNextOp()) {
+    LiteralMatcher* top = &*lms.top();
+    //the bins at this LIT_END are about to be read (by the emptiness check
+    //below and when entering the following literal); they are complete only
+    //once the current literal matcher has been fully executed
+    if(!top->eagerlyMatched()) {
+      top->doEagerMatching();
+      RSTAT_MST_INC("match count", lms.size()-1, top->getILS()->matchCnt);
+    }
+    if(!ils->hasSuccessor) {
+      bool empty = true;
+      for (const Bin& bin: ils->nextBinIndices) {
+        if (top->nextBins[bin.index].isNonEmpty()) {
+          empty = false;
+          break;
+        }
+      }
+      if (empty) {
+        //neither a successor nor any recorded checkpoint to continue at;
+        //mark the literal as finished so that further matches of it are
+        //not even recorded
+        ils->visited=true;
+        ils->finished=true;
+        return false;
       }
     }
-    if (empty) return false;
-  }
-
-  //we have already matched and entered some index literals, so we
-  //will check for compatibility of variable assignments
-  if(!lms.top()->eagerlyMatched()) {
-    lms.top()->doEagerMatching();
-    RSTAT_MST_INC("match count", lms.size()-1, lms.top()->getILS()->matchCnt);
   }
 
   if(lms.size()>1) {
+    //we have already matched and entered some index literals, so we
+    //will check for compatibility of variable assignments
+    if(ils->varCnt && !lms.top()->eagerlyMatched()) {
+      lms.top()->doEagerMatching();
+      RSTAT_MST_INC("match count", lms.size()-1, lms.top()->getILS()->matchCnt);
+    }
     for(size_t ilIndex=0;ilIndex<lms.size()-1;ilIndex++) {
       ILStruct* prevILS=lms[ilIndex]->getILS();
-      if(!lms[ilIndex]->eagerlyMatched()) {
+      if(prevILS->varCnt && !lms[ilIndex]->eagerlyMatched()) {
 	lms[ilIndex]->doEagerMatching();
 	RSTAT_MST_INC("match count", ilIndex, lms[ilIndex]->getILS()->matchCnt);
       }
@@ -2373,7 +2401,7 @@ void ClauseCodeTree<higherOrder>::ClauseMatcher::enterLiteral(CodeOp* entry, boo
   }
 
   Recycled<LiteralMatcher, NoReset> lm;
-  lm->init(tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess, false, Stack<CheckPoint>(), 0);
+  lm->init(tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess);
   lms.push(std::move(lm));
 }
 
@@ -2386,19 +2414,32 @@ void ClauseCodeTree<higherOrder>::ClauseMatcher::enterLiteral(CodeOp* entry, boo
  *   to see just clauses that end at this point).
  */
 template<bool higherOrder>
-void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuccess, unsigned nextBinCnt, bool reachedByNextOp, Stack<CheckPoint>&& checkpoints)
+void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuccess, ILStruct* ils)
 {
   if(!seekOnlySuccess) {
     RSTAT_MCTR_INC("enterLiteral levels (non-sos)", lms.size());
   }
 
+  //the checkpoints of the new literal matcher are read lazily from the
+  //previous literal matcher's bins; the previous matcher stays alive below
+  //us on the lms stack and has been fully (eagerly) executed whenever
+  //ils->reachedByNextOp() holds, so its recorded checkpoints are complete
+  //and stable
+  const Stack<Bin>* lazyBins = nullptr;
+  const typename LiteralMatcher::Base* lazySource = nullptr;
+  unsigned nrNextBins = ils ? ils->nextBinCnt : tree->nextBinCnt;
+  if(!seekOnlySuccess && ils && ils->reachedByNextOp()) {
+    lazyBins = &ils->nextBinIndices;
+    lazySource = &*lms.top();
+  }
+
   if(lms.isNonEmpty()) {
     Recycled<LiteralMatcher, NoReset>& prevLM = lms.top();
-    ILStruct* ils=prevLM->op->getILS();
-    ASS_EQ(ils->timestamp,tree->_curTimeStamp);
-    ASS(!ils->visited);
-    ASS(!ils->finished);
-    ils->visited=true;
+    ILStruct* prevIls=prevLM->op->getILS();
+    ASS_EQ(prevIls->timestamp,tree->_curTimeStamp);
+    ASS(!prevIls->visited);
+    ASS(!prevIls->finished);
+    prevIls->visited=true;
   }
 
   size_t linfoCnt=lInfos.size();
@@ -2413,7 +2454,7 @@ void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::enterLiteral(
   }
 
   Recycled<LiteralMatcher, NoReset> lm;
-  lm->init(tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess, reachedByNextOp, std::move(checkpoints), nextBinCnt);
+  lm->init(tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess, lazyBins, lazySource, nrNextBins);
   lms.push(std::move(lm));
 }
 

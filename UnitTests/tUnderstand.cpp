@@ -2611,3 +2611,174 @@ TEST_FUN(ReproduceRemove3)
   clauses.push_back(clause({ ~p(x3) }));
   checkOptimization(clauses, nullptr, true);
 }
+
+
+TEST_FUN(BigReproducer)
+{
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION);
+  OptimizedClauseCodeTree<false> wtree;
+  wtree.insert(clause({~p(f2(x2,x1)), ~p(x2), p(x1)}));
+  wtree.insert(clause({~p(f2(f2(f2(c,f2(d,e)),e),f2(d,c)))}));
+  wtree.insert(clause({p(f2(x1,f2(f2(x2,f2(x3,x1)),f2(x3,x2))))}));
+  wtree.insert(clause({p(f2(f2(x2,f2(x3,x1)),f2(x3,x2))), ~p(x1)}));
+  wtree.insert(clause({~p(f2(x2,f2(x3,x1))), ~p(x1), p(f2(x3,x2))}));
+  wtree.insert(clause({p(f2(f2(x2,f2(x1,x3)),x3)), ~p(f2(x1,x2))}));
+  wtree.insert(clause({p(f2(x2,f2(x1,f2(x2,x3)))), ~p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x2,f2(x1,x3))), ~p(f2(x1,x2)), p(x3)}));
+  wtree.insert(clause({~p(f2(x3,x2)), ~p(x2), ~p(x1), p(f2(x1,x3))}));
+  wtree.insert(clause({p(f2(x1,f2(x3,x2))), ~p(x2), ~p(x3), ~p(x1)}));
+  wtree.insert(clause({~p(d)}));
+  wtree.insert(clause({p(f2(x4,f2(x2,f2(x1,f2(x4,x3))))), ~p(x3), ~p(f2(x1,x2))}));
+  wtree.insert(clause({p(f2(x2,x1)), ~p(x2), ~p(x1)}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),x3)), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(f2(d,c))}));
+  wtree.insert(clause({~p(f2(x1,x2)), p(f2(x2,x3)), ~p(x1), ~p(x3)}));
+
+  Kernel::Clause* C1 = clause({~p(x3)});
+  wtree.insert(C1);
+  wtree.remove(C1);
+
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x1,x3)))), p(x2), ~p(x3)}));
+  wtree.insert(clause({p(f2(x1,f2(x2,x2))), ~p(x1)}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,f2(x1,x4))))), p(x4), ~p(f2(x3,x2))}));
+  wtree.insert(clause({p(f2(x2,x2))}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),f2(x2,x1))), ~p(x4), p(f2(x4,x3))}));
+  wtree.insert(clause({~p(f2(x2,x1)), ~p(x1), p(x2)}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,x3))), ~p(x4), p(f2(x4,x2)), ~p(x1), ~p(x3)}));
+  wtree.insert(clause({p(f2(f2(x2,x2),x3)), ~p(x3)}));
+  wtree.insert(clause({p(f2(x3,f2(x2,f2(x1,x4)))), ~p(x3), ~p(f2(x1,x2)), ~p(x4)}));
+  wtree.insert(clause({~p(f2(x1,f2(x1,x2))), p(x2)}));
+  wtree.insert(clause({p(f2(x2,f2(x2,x1))), ~p(x1)}));
+  wtree.insert(clause({~p(f2(x3,x4)), ~p(f2(x2,x3)), ~p(x1), p(f2(x2,f2(x4,x1)))}));
+  wtree.insert(clause({~p(f2(x2,f2(x4,x1))), ~p(f2(x2,x3)), ~p(x1), p(f2(x3,x4))}));
+  wtree.insert(clause({~p(f2(f2(x2,x2),x1)), p(x1)}));
+  wtree.insert(clause({p(f2(x3,f2(x2,f2(x4,x1)))), ~p(f2(x2,x3)), ~p(x4), ~p(x1)}));
+
+  Kernel::Clause* C2 = clause({~p(f2(x2,x1)), ~p(x2)});
+  wtree.insert(C2);
+  wtree.remove(C2);
+
+  wtree.insert(clause({~p(f2(x3,f2(x2,f2(x4,x1)))), ~p(f2(x2,x3)), ~p(x1), ~p(x5), p(f2(x5,x4))}));
+  wtree.insert(clause({~p(f2(x1,x2)), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(f2(x2,x3)), ~p(x1), ~p(f2(x2,x1)), p(x3)}));
+  wtree.insert(clause({p(f2(f2(x1,x2),x1)), ~p(x2)}));
+  wtree.insert(clause({~p(f2(x2,x3)), ~p(x1), ~p(x3), p(f2(x2,x1))}));
+  wtree.insert(clause({p(f2(f2(x1,x2),x3)), ~p(x1), ~p(x2), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x1,f2(x3,x2))), ~p(x2), ~p(x3), p(x1)}));
+  wtree.insert(clause({~p(f2(x2,f2(f2(x3,x1),f2(x2,x3)))), p(x1)}));
+  wtree.insert(clause({~p(f2(f2(x2,x1),x2)), p(x1)}));
+  wtree.insert(clause({p(f2(x3,f2(x2,x4))), ~p(f2(x2,x3)), ~p(x4)}));
+  wtree.insert(clause({~p(c)}));
+  wtree.insert(clause({~p(f2(x2,x5)), p(f2(x5,x1)), ~p(f2(x1,x2))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x1), ~p(x4), p(f2(x4,x2))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,x3)))), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(f2(x2,f2(x1,f2(x4,x3)))), ~p(x3), ~p(x4), p(f2(x1,x2))}));
+  wtree.insert(clause({p(f2(f2(x1,f2(x1,x2)),x2))}));
+  wtree.insert(clause({p(f2(f2(f2(x1,f2(x2,x3)),f2(x2,x1)),x4)), ~p(x3), ~p(x4)}));
+  wtree.insert(clause({p(f2(x1,f2(x1,f2(x2,x2))))}));
+  wtree.insert(clause({p(f2(f2(x1,f2(x2,x3)),x4)), ~p(x2), ~p(x4), ~p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,x2))), p(x1)}));
+  wtree.insert(clause({~p(f2(x2,f2(x1,x4))), p(f2(f2(x1,x2),x3)), ~p(x3), ~p(x4)}));
+  wtree.insert(clause({p(f2(x1,f2(x2,f2(x2,x1))))}));
+  wtree.insert(clause({~p(f2(x3,f2(x4,x1))), p(f2(x1,x2)), ~p(x2), ~p(f2(x4,x3))}));
+  wtree.insert(clause({p(f2(f2(x1,f2(x2,x2)),x1))}));
+  wtree.insert(clause({~p(f2(x2,f2(x4,x1))), ~p(f2(x2,x3)), p(x1), ~p(x3), ~p(x4)}));
+  wtree.insert(clause({p(f2(f2(x1,x1),f2(x2,x2)))}));
+  wtree.insert(clause({~p(f2(x3,f2(x2,f2(x4,x1)))), ~p(f2(x2,x3)), ~p(x4), p(x1)}));
+  wtree.insert(clause({~p(f2(x3,f2(x4,x2))), p(f2(x1,x2)), ~p(x3), ~p(x4), ~p(x1)}));
+  wtree.insert(clause({~p(f2(x2,f2(x2,f2(x3,x1)))), p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x3,f2(x4,x2))), p(f2(x1,x2)), ~p(x1), ~p(f2(x4,x3))}));
+  wtree.insert(clause({~p(f2(x3,f2(x3,x2))), p(f2(x1,x2)), ~p(x1)}));
+  wtree.insert(clause({~p(f2(x3,f2(f2(x3,x2),x1))), ~p(x2), p(x1)}));
+  wtree.insert(clause({~p(f2(x3,x1)), ~p(f2(x2,x3)), ~p(x4), ~p(x1), p(f2(x2,x4))}));
+  wtree.insert(clause({~p(f2(f2(x2,x1),x3)), p(x1), ~p(x3), ~p(x2)}));
+  wtree.insert(clause({~p(f2(x2,x4)), ~p(f2(x2,x3)), ~p(x4), ~p(x1), p(f2(x3,x1))}));
+  wtree.insert(clause({~p(f2(x2,f2(x3,x1))), ~p(x2), p(x1), ~p(x3)}));
+  wtree.insert(clause({p(f2(f2(x3,f2(x2,x4)),x5)), ~p(x5), ~p(f2(x2,x3)), ~p(x4)}));
+  wtree.insert(clause({~p(f2(x3,x1)), ~p(f2(x2,x3)), p(x1), ~p(x2)}));
+  wtree.insert(clause({~p(f2(x2,x4)), ~p(f2(x2,x3)), ~p(x5), p(f2(x5,x3)), ~p(x4)}));
+  wtree.insert(clause({~p(f2(f2(x3,x1),f2(x2,x3))), ~p(x2), p(x1)}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(x4,x3))), ~p(x2), ~p(x4)}));
+  wtree.insert(clause({p(f2(x2,f2(x1,x2))), ~p(x1)}));
+  wtree.insert(clause({p(f2(x2,f2(x4,f2(x3,x1)))), ~p(f2(x3,x4)), ~p(f2(x1,x2))}));
+  wtree.insert(clause({p(f2(f2(x1,x2),x2)), ~p(x1)}));
+  wtree.insert(clause({~p(f2(x2,x3)), ~p(f2(x1,x2)), p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),x4)), ~p(x1), p(f2(x4,x2)), ~p(x3)}));
+  wtree.insert(clause({~p(f2(f2(x1,x2),x3)), ~p(f2(x3,x1)), p(x2)}));
+  wtree.insert(clause({~p(f2(x4,x3)), ~p(x3), p(f2(x2,x4)), ~p(x1), ~p(f2(x1,x2))}));
+  wtree.insert(clause({~p(f2(x2,x3)), p(f2(f2(x1,x1),x2)), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x3,x1)), ~p(x3), ~p(f2(x2,x4)), p(x4), ~p(f2(x1,x2))}));
+  wtree.insert(clause({p(f2(f2(x1,f2(x2,x3)),x3)), ~p(x2), ~p(x1)}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),x3)), ~p(x2), p(x1)}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),x3)), ~p(x1), ~p(x4), p(f2(x4,x2))}));
+  wtree.insert(clause({~p(f2(x5,x1)), ~p(x2), ~p(x4), ~p(f2(x1,x2)), p(f2(x4,x5))}));
+  wtree.insert(clause({~p(f2(f2(x4,x4),x2)), ~p(f2(x2,x3)), p(x3)}));
+  wtree.insert(clause({p(f2(f2(x1,f2(x2,f2(x3,x4))),x5)), ~p(x3), ~p(x5), ~p(x4), ~p(f2(x2,x1))}));
+  wtree.insert(clause({~p(f2(x4,f2(x3,x5))), p(f2(x1,x2)), ~p(x3), ~p(x1), ~p(x5), ~p(f2(x4,x2))}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,x3)),f2(x2,x1))), p(x3)}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,x3))), p(x2), ~p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(f2(x1,x2),f2(x3,x4))), ~p(f2(x1,x3)), ~p(x2), ~p(x5), p(f2(x5,x4))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,f2(x4,x5))))), ~p(f2(x4,x3)), ~p(x5), p(f2(x2,x1))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,x4)))), ~p(x5), p(f2(x1,f2(x4,x5))), ~p(f2(x3,x2))}));
+
+  Kernel::Clause* C3 = clause({~p(f2(x2,x3))});
+  wtree.insert(C3);
+  wtree.remove(C3);
+
+  wtree.insert(clause({p(f2(x1,f2(f2(f2(x4,f2(x5,x2)),f2(x5,x4)),x3))), ~p(x3), ~p(f2(x1,x2))}));
+  wtree.insert(clause({p(f2(x2,f2(f2(x2,x3),x1))), ~p(x3), ~p(x1)}));
+  wtree.insert(clause({p(f2(x1,f2(f2(x4,f2(x2,x5)),x3))), ~p(x3), ~p(f2(x1,x2)), ~p(x4), ~p(x5)}));
+  wtree.insert(clause({~p(f2(x1,f2(x3,x3))), ~p(f2(x1,x2)), p(x2)}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(f2(x4,x5),x3))), ~p(x5), ~p(x4), ~p(x2)}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x2), p(f2(x1,f2(x3,x3)))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,x4)))), ~p(x5), p(f2(x1,f2(f2(x3,x2),x5))), ~p(x4)}));
+  wtree.insert(clause({~p(f2(x1,f2(f2(x2,x2),x3))), p(x1), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x3,f2(x1,x4))), ~p(f2(x1,x2)), p(f2(x2,x5)), ~p(x4), ~p(f2(x3,x5))}));
+  wtree.insert(clause({p(f2(x1,f2(x2,x3))), ~p(x3), ~p(f2(x1,x2))}));
+  wtree.insert(clause({~p(f2(x3,x5)), ~p(f2(x3,x4)), p(f2(x2,x5)), ~p(x1), ~p(f2(x1,x2)), ~p(x4)}));
+  wtree.insert(clause({~p(f2(f2(x1,x2),x3)), ~p(x2), p(f2(x3,x1))}));
+  wtree.insert(clause({~p(f2(f2(x1,f2(x2,f2(x3,x4))),x5)), ~p(x4), p(f2(x5,x3)), ~p(f2(x2,x1))}));
+  wtree.insert(clause({~p(f2(f2(x2,x1),f2(f2(x3,x3),x2))), p(x1)}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), ~p(x4), p(f2(f2(x1,f2(x3,x4)),x5)), ~p(x2), ~p(x5)}));
+  wtree.insert(clause({p(f2(x1,f2(f2(x2,x2),x1)))}));
+  wtree.insert(clause({p(f2(f2(f2(x1,x1),x2),x2))}));
+  wtree.insert(clause({~p(f2(x1,f2(f2(x2,x3),f2(x1,x4)))), ~p(x2), ~p(x3), ~p(x5), p(f2(x5,x4))}));
+  wtree.insert(clause({~p(f2(x2,f2(x3,x3))), p(f2(x1,x2)), ~p(x1)}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,f2(x1,f2(x4,x5)))))), ~p(x4), ~p(x5), p(f2(x3,x2))}));
+  wtree.insert(clause({~p(f2(x5,x1)), ~p(f2(x2,x3)), ~p(x4), p(f2(x4,x5)), ~p(x3), ~p(f2(x1,x2))}));
+  wtree.insert(clause({p(f2(x1,f2(f2(x2,x2),f2(x1,x3)))), ~p(x3)}));
+  wtree.insert(clause({~p(f2(x1,f2(f2(x2,x3),f2(x1,x4)))), ~p(x3), ~p(x5), p(f2(x5,x2)), ~p(x4)}));
+  wtree.insert(clause({~p(f2(x1,f2(x5,x3))), ~p(x3), ~p(x4), p(f2(x4,x5)), ~p(x2), ~p(f2(x1,x2))}));
+  wtree.insert(clause({~p(f2(x1,f2(x3,x3))), p(f2(x1,f2(x2,x2)))}));
+  wtree.insert(clause({p(f2(x1,f2(f2(x4,f2(x5,f2(x2,x6))),x3))), ~p(x3), ~p(f2(x1,x2)), ~p(x6), ~p(f2(x5,x4))}));
+  wtree.insert(clause({p(f2(x3,f2(x3,f2(x2,x1)))), ~p(x2), ~p(x1)}));
+  wtree.insert(clause({~p(f2(x5,x4)), ~p(x3), p(f2(x1,f2(f2(x4,f2(x5,x6)),x3))), ~p(x2), ~p(f2(x1,x2)), ~p(x6)}));
+  wtree.insert(clause({p(f2(f2(x1,f2(x1,x2)),x3)), ~p(x3), ~p(x2)}));
+  wtree.insert(clause({~p(f2(x5,x2)), ~p(x3), ~p(x4), ~p(f2(x1,x2)), ~p(x6), p(f2(x5,f2(f2(x1,f2(x3,x4)),x6)))}));
+  wtree.insert(clause({~p(f2(x3,f2(x3,x1))), ~p(x2), p(f2(x1,x2))}));
+  wtree.insert(clause({~p(f2(x1,f2(x2,f2(x3,f2(x1,f2(x4,x5)))))), ~p(x5), ~p(x6), p(f2(x6,x4)), ~p(f2(x3,x2))}));
+  wtree.insert(clause({~p(f2(x1,x2)), ~p(x3), p(f2(x1,f2(f2(x4,x4),x3))), ~p(x2)}));
+  wtree.insert(clause({~p(f2(f2(x2,f2(x3,x4)),x1)), ~p(x1), p(x4), ~p(f2(x3,x2))}));
+  wtree.insert(clause({~p(f2(f2(x3,x3),f2(x2,x1))), ~p(x2), p(x1)}));
+  wtree.insert(clause({~p(f2(x2,x1)), ~p(x1), p(f2(f2(x3,f2(x4,x2)),f2(x4,x3)))}));
+  wtree.insert(clause({~p(f2(f2(x2,f2(x3,x4)),x1)), ~p(x1), p(f2(x3,x2)), ~p(x4)}));
+  wtree.insert(clause({~p(f2(f2(x3,x1),x2)), p(x2), ~p(x3), ~p(x1)}));
+  wtree.insert(clause({~p(f2(f2(x2,f2(x3,x4)),f2(x3,x2))), ~p(x1), p(f2(x4,x1))}));
+  wtree.insert(clause({~p(f2(f2(f2(x3,x3),x1),x2)), p(x2), ~p(x1)}));
+  wtree.insert(clause({~p(f2(x2,f2(x3,x4))), ~p(x1), p(f2(x3,x1)), ~p(x2), ~p(x4)}));
+}
+
+TEST_FUN(BigReproducerMinimized)
+{
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION);
+  OptimizedClauseCodeTree<false> wtree;
+  wtree.insert(clause({ ~p(f2(x2,f2(x3,x1))) }));
+  wtree.insert(clause({ ~p(f2(x3,f2(x2,f2(x4,x1)))), ~p(f2(x2,x3)) }));
+  wtree.insert(clause({ ~p(f2(x3,f2(x4,x1))), ~p(x2) }));
+  wtree.insert(clause({ ~p(f2(x3,f2(x4,x2))), p(f2(x1,x2)), ~p(x3), ~p(x4), ~p(x1) }));
+  std::cout << wtree << std::endl;
+
+  Kernel::Clause *C1 = clause({ ~p(f2(x2,f2(x3,x4))), ~p(x1), ~p(x2) });
+  wtree.insert(C1);
+  std::cout << wtree << std::endl;
+}

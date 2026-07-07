@@ -67,7 +67,7 @@ protected:
     using Base::_matched;
 
     void init(CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_,
-	ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_, bool reachedByNext_=false, Stack<CheckPoint>&& checkpoints_=Stack<CheckPoint>(), unsigned nrNextBins=0);
+	ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_, Stack<CheckPoint>&& checkpoints_=Stack<CheckPoint>(), unsigned nrNextBins=0);
 
     void doEagerMatching();
     bool execute();
@@ -95,7 +95,10 @@ protected:
     using CheckPoint = typename Base::CheckPoint;
     using RecordedCheckPoint = typename Base::RecordedCheckPoint;
 
-    void init(CodeTree* tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess, bool reachedByNext_, Stack<CheckPoint>&& checkpoints_, unsigned nrNextBins);
+    void init(CodeTree* tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess,
+        const Stack<ILStruct::Bin>* lazyBins_=nullptr,
+        const Base* lazySource_=nullptr,
+        unsigned nrNextBins=0);
     bool next();
     bool doEagerMatching();
 
@@ -253,7 +256,7 @@ public:
     USE_ALLOCATOR(OptimizedClauseMatcher);
 
   private:
-    void enterLiteral(CodeOp* entry, bool seekOnlySuccess, unsigned nextBinCnt, bool reachedByNextOp, Stack<CheckPoint>&& checkpoints);
+    void enterLiteral(CodeOp* entry, bool seekOnlySuccess, ILStruct* ils);
     bool canEnterLiteral(CodeOp* op);
     OptimizedClauseCodeTree<higherOrder>* tree;
   };
@@ -303,7 +306,7 @@ private:
       unsigned actualSharedPrefix(unsigned sharedPrefix);
     };
 
-    const unsigned NextOpThreshold = 1;
+    const unsigned NextOpThreshold = 5;
     static const unsigned CheckFunOpThreshold=5; //must be greater than 1 or it would cause loops
     static const unsigned CheckGroundTermOpThreshold=3; //must be greater than 1 or it would cause loops
 

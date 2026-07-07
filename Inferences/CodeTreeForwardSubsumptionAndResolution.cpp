@@ -44,6 +44,7 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
   Clause* premise;
   int resolvedQueryLit;
 
+  /*
   auto printResult = [](const std::pair<Clause*, int>& result) {
     std::cout << result.first->toReproducerString()
               << " resolvedQueryLit=" << result.second << std::endl;
@@ -55,18 +56,24 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
       printResult(result);
     }
   };
+  */
 
   std::vector<std::pair<Clause*, int>> clauseMatcherResults;
+  premise = cm.next(resolvedQueryLit);
+  std::cout << "Original got result " << premise << std::endl;
+  /*
   while ((premise = cm.next(resolvedQueryLit))) {
     clauseMatcherResults.emplace_back(premise, resolvedQueryLit);
   }
 
   std::vector<bool> consumed(clauseMatcherResults.size(), false);
   std::vector<std::pair<Clause*, int>> optimizedClauseMatcherResults;
+  */
 
   //std::cout << "Run on " << cl->toReproducerString() << std::endl;
 
   while ((premise = ocm.next(resolvedQueryLit))) {
+    /*
     optimizedClauseMatcherResults.emplace_back(premise, resolvedQueryLit);
     const auto optimizedResult = optimizedClauseMatcherResults.back();
     bool found = false;
@@ -86,6 +93,7 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
       std::cout << "  ";
       printResult(optimizedResult);
     }
+    */
 
     if (resolvedQueryLit == -1) {
       ASS(satSubs.checkSubsumption(premise, cl));
@@ -113,6 +121,7 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
     return true;
   }
 
+  /*
   for (size_t i = 0; i < clauseMatcherResults.size(); i++) {
     if (!consumed[i]) {
       std::cout << "Executed on clause " << cl->toReproducerString() << std::endl;
@@ -125,6 +134,7 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
       ASS_REP(false, "OptimizedClauseMatcher exhausted but ClauseMatcher still has unmatched results");
     }
   }
+  */
 
   cm.reset();
   ocm.reset();

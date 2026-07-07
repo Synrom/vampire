@@ -391,35 +391,49 @@ public:
       BindingArray bindings;
       BTPoint btPoint;
 
-      CheckPoint(size_t liIndex_, BindingArray&& bindings_, size_t tp, CodeOp* op, size_t fibDepth_=0, Stack<CodeOp*> firstsInBlocks_ = Stack<CodeOp*>()) 
-        : liIndex(liIndex_), bindings(bindings_), btPoint(tp, op)
+      CheckPoint(size_t liIndex_, BindingArray&& bindings_, size_t tp, CodeOp* op, size_t fibDepth_=0, Stack<CodeOp*> firstsInBlocks_ = Stack<CodeOp*>())
+        : liIndex(liIndex_), bindings(std::move(bindings_)), btPoint(tp, op)
       {
         if constexpr (removing) {
           FibDepthFieldRemoving::fibDepth = fibDepth_;
-          FibDepthFieldRemoving::firstsInBlocks = firstsInBlocks_;
+          FibDepthFieldRemoving::firstsInBlocks = std::move(firstsInBlocks_);
         }
       }
     };   
 
+    /**
+     * A lightweight record of a point at which matching can be resumed at
+     * the target of a NEXT operation.
+     *
+     * The bindings are not stored here but in the recording matcher's
+     * @b cpBindingPool (as the slice [bindOffset,bindOffset+bindCnt)),
+     * so that recording a checkpoint requires no memory allocation.
+     * Note that for a given bin the size of the bindings is always the
+     * same, as the same NEXT operation is preceded by the same variable
+     * assignments.
+     */
     struct RecordedCheckPoint
     {
-      size_t liIndex;
-      BindingArray bindings;
-      size_t tp;
+      unsigned liIndex;
+      unsigned tp;
+      unsigned bindOffset;
+      unsigned bindCnt;
 
-      RecordedCheckPoint(size_t liIndex_, BindingArray&& bindings_, size_t tp_)
-        : liIndex(liIndex_), bindings(bindings_), tp(tp_) 
-        {
-          
+      RecordedCheckPoint(unsigned liIndex_, unsigned tp_, unsigned bindOffset_, unsigned bindCnt_)
+        : liIndex(liIndex_), tp(tp_), bindOffset(bindOffset_), bindCnt(bindCnt_) {}
+
+      inline CheckPoint toCheckpoint(const Stack<TermList>& pool, CodeOp *op, Stack<CodeOp*> firstInBlock_ = Stack<CodeOp*>()) const {
+        BindingArray b;
+        b.ensure(bindCnt);
+        for (unsigned i=0; i<bindCnt; i++) {
+          b[i] = pool[bindOffset+i];
         }
-
-      inline CheckPoint toCheckpoint(CodeOp *op, Stack<CodeOp*> firstInBlock_ = Stack<CodeOp*>()) {
         if constexpr (removing) {
-          return CheckPoint(liIndex, bindings.clone(), tp, op, firstInBlock_.length(), firstInBlock_);
+          return CheckPoint(liIndex, std::move(b), tp, op, firstInBlock_.length(), firstInBlock_);
         }
-        return CheckPoint(liIndex, bindings.clone(), tp, op);
+        return CheckPoint(liIndex, std::move(b), tp, op);
       }
-    };   
+    };
 
     inline bool finished() const { return !fresh && !_matched; }
     inline bool matched() const { return _matched && op->isLitEnd(); }
@@ -438,8 +452,33 @@ public:
     BindingArray bindings;
 
     DArray<Stack<RecordedCheckPoint>> nextBins;
+    /** Bindings of the recorded checkpoints in @b nextBins */
+    Stack<TermList> cpBindingPool;
+    /** Indices of the bins in @b nextBins that contain checkpoints
+     * (so that @b init only needs to reset those) */
+    Stack<unsigned> touchedBins;
+    /** Materialized checkpoints to continue matching at (used by the removal code) */
     Stack<CheckPoint> checkpoints;
-    bool reachedByNext = false;
+    /**
+     * Lazy checkpoint source (used during retrieval): the bins recorded at the
+     * previous literal's LIT_END together with the previous literal matcher,
+     * whose @b nextBins and @b cpBindingPool the checkpoints refer to.
+     * The previous literal matcher outlives this one and must have been
+     * eagerly matched, so its recorded checkpoints are complete and stable;
+     * we materialize them one at a time in @b prepareLiteral instead of
+     * cloning them all up front.
+     */
+    const Stack<ILStruct::Bin>* lazyBins = nullptr;
+    const Matcher* lazySource = nullptr;
+    /** position in @b lazyBins of the next bin to open */
+    size_t lazyBinPos = 0;
+    /** iteration bounds within the currently open bin */
+    const RecordedCheckPoint* lazyCp = nullptr;
+    const RecordedCheckPoint* lazyCpEnd = nullptr;
+    /** continuation entry of the currently open bin */
+    CodeOp* lazyEntry = nullptr;
+    /** true while we are matching from @b entry; once the entry code is
+     * exhausted we continue with the checkpoints */
     bool executingNormally = false;
     unsigned boundedSize=0;
 
@@ -455,7 +494,7 @@ public:
 
   protected:
     void init(CodeTree* tree_, CodeOp* entry_, LitInfo* linfos_ = 0,
-      size_t linfoCnt_= 0 , Stack<CodeOp*>* firstsInBlocks_ = 0, bool reachedByNext_=false, Stack<CheckPoint>&& checkpoints_=Stack<CheckPoint>(), unsigned nrNextBins=0);
+      size_t linfoCnt_= 0 , Stack<CodeOp*>* firstsInBlocks_ = 0, Stack<CheckPoint>&& checkpoints_=Stack<CheckPoint>(), unsigned nrNextBins=0);
 
     bool backtrack();
     bool prepareLiteral();

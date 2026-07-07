@@ -689,7 +689,7 @@ bool CodeTree::Matcher<removing, checkRange, higherOrder>::execute()
 }
 
 template<bool removing, bool checkRange, bool higherOrder>
-void CodeTree::Matcher<removing, checkRange, higherOrder>::init(CodeTree* tree_, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, Stack<CodeOp*>* firstsInBlocks_, bool reachedByNext_, Stack<CheckPoint>&& checkpoints_, unsigned nrNextBins)
+void CodeTree::Matcher<removing, checkRange, higherOrder>::init(CodeTree* tree_, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, Stack<CodeOp*>* firstsInBlocks_, Stack<CheckPoint>&& checkpoints_, unsigned nrNextBins)
 {
   tree=tree_;
   entry=entry_;
@@ -697,14 +697,24 @@ void CodeTree::Matcher<removing, checkRange, higherOrder>::init(CodeTree* tree_,
   linfos=linfos_;
   linfoCnt=linfoCnt_;
 
-  reachedByNext = reachedByNext_;
-  checkpoints = checkpoints_;
-  nextBins.ensure(nrNextBins);
-  for (Stack<RecordedCheckPoint>& bin: nextBins) {
-    bin.reset();
-    bin.reserve(linfoCnt);
+  checkpoints = std::move(checkpoints_);
+  lazyBins = nullptr;
+  lazySource = nullptr;
+  lazyBinPos = 0;
+  lazyCp = nullptr;
+  lazyCpEnd = nullptr;
+  lazyEntry = nullptr;
+  //only the bins that were actually used in the previous run need to be
+  //reset; this has to happen before the ensure() call below, as the
+  //recorded indices refer to the current size of the array
+  while (touchedBins.isNonEmpty()) {
+    nextBins[touchedBins.pop()].reset();
   }
-  executingNormally = false;
+  cpBindingPool.reset();
+  nextBins.ensure(nrNextBins);
+  //the code following the previous LIT_END is executed before the checkpoints,
+  //as it is more likely to quickly lead to a SUCCESS operation
+  executingNormally = entry_ != nullptr;
 
   if constexpr (removing) {
     RemovingBase::firstsInBlocks=firstsInBlocks_;
@@ -748,48 +758,84 @@ bool CodeTree::Matcher<removing, checkRange, higherOrder>::backtrack()
 template<bool removing, bool checkRange, bool higherOrder>
 bool CodeTree::Matcher<removing, checkRange, higherOrder>::prepareLiteral()
 {
-  if (reachedByNext && !executingNormally) {
-    while (!checkpoints.isEmpty() && checkpoints.top().liIndex >= linfoCnt) {
-      checkpoints.pop();
-    }
-    if (checkpoints.isEmpty()) {
-      if (!entry) {
-        fresh = false;
-        return false;
-      } else {
-        executingNormally = true;
-        curLInfo = 0;
-      }
-    } else {
-      CheckPoint checkpoint = checkpoints.pop();
-      ASS(bindings.size() >= checkpoint.bindings.size());
-      for (unsigned i=0; i < checkpoint.bindings.size(); i++) {
-        bindings[i] = checkpoint.bindings[i];
-      }
-      boundedSize = checkpoint.bindings.size();
-      curLInfo = checkpoint.liIndex; 
-      ft = linfos[curLInfo].ft;
-      auto bp = checkpoint.btPoint;
-      tp=bp.tp;
-      op=bp.op;
+  //first execute the code following the previous LIT_END (if there is any),
+  //as it is more likely to quickly lead to a SUCCESS operation than the
+  //checkpoint continuations
+  if (executingNormally) {
+    if (curLInfo < linfoCnt) {
       if constexpr (removing) {
-        *RemovingBase::firstsInBlocks = checkpoint.firstsInBlocks;
-        ASS_EQ(RemovingBase::firstsInBlocks->length(), checkpoint.fibDepth);
-        RemovingBase::firstsInBlocks->push(op);
+        RemovingBase::firstsInBlocks->truncate(RemovingBase::initFIBDepth);
       }
+      ft=linfos[curLInfo].ft;
+      tp=0;
+      op=entry;
+      boundedSize=0;
+      return true;
+    }
+    executingNormally = false;
+  }
+
+  //materialized checkpoints (used by the removal code)
+  while (checkpoints.isNonEmpty()) {
+    if (checkpoints.top().liIndex >= linfoCnt) {
+      checkpoints.pop();
+      continue;
+    }
+    CheckPoint checkpoint = checkpoints.pop();
+    ASS(bindings.size() >= checkpoint.bindings.size());
+    for (unsigned i=0; i < checkpoint.bindings.size(); i++) {
+      bindings[i] = checkpoint.bindings[i];
+    }
+    boundedSize = checkpoint.bindings.size();
+    curLInfo = checkpoint.liIndex;
+    ft = linfos[curLInfo].ft;
+    tp=checkpoint.btPoint.tp;
+    op=checkpoint.btPoint.op;
+    if constexpr (removing) {
+      *RemovingBase::firstsInBlocks = std::move(checkpoint.firstsInBlocks);
+      ASS_EQ(RemovingBase::firstsInBlocks->length(), checkpoint.fibDepth);
+      RemovingBase::firstsInBlocks->push(op);
+    }
+    return true;
+  }
+
+  //checkpoints read lazily from the previous literal matcher's bins
+  //(used during retrieval)
+  if (lazyBins) {
+    for (;;) {
+      while (lazyCp == lazyCpEnd) {
+        if (lazyBinPos >= lazyBins->size()) {
+          goto lazyExhausted;
+        }
+        const ILStruct::Bin& b = (*lazyBins)[lazyBinPos++];
+        const Stack<RecordedCheckPoint>& bin = lazySource->nextBins[b.index];
+        lazyCp = bin.begin();
+        lazyCpEnd = bin.end();
+        lazyEntry = b.entry;
+      }
+      const RecordedCheckPoint& cp = *(lazyCp++);
+      if (cp.liIndex >= linfoCnt) {
+        continue;
+      }
+      ASS(bindings.size() >= cp.bindCnt);
+      const TermList* poolBindings = lazySource->cpBindingPool.begin()+cp.bindOffset;
+      for (unsigned i=0; i < cp.bindCnt; i++) {
+        bindings[i] = poolBindings[i];
+      }
+      boundedSize = cp.bindCnt;
+      curLInfo = cp.liIndex;
+      ft = linfos[curLInfo].ft;
+      tp = cp.tp;
+      op = lazyEntry;
       return true;
     }
   }
-  if constexpr (removing) {
-    RemovingBase::firstsInBlocks->truncate(RemovingBase::initFIBDepth);
-  }
-  if(curLInfo>=linfoCnt) {
-    return false;
-  }
-  ft=linfos[curLInfo].ft;
-  tp=0;
-  op=entry;
-  return true;
+lazyExhausted:
+
+  //make sure the matcher counts as finished even if this was the initial
+  //call from init (in which case @b fresh would still be true)
+  fresh = false;
+  return false;
 }
 
 template<bool removing, bool checkRange, bool higherOrder>
@@ -873,14 +919,21 @@ inline void CodeTree::Matcher<removing, checkRange, higherOrder>::doNextOp()
   unsigned bin = op->_arg();
   ASS(bin < nextBins.size());
 
-  BindingArray clonedBinding(boundedSize);
+  //store the bindings in the pool instead of a separate array, so that
+  //recording a checkpoint requires no memory allocation
+  unsigned bindOffset = (unsigned)cpBindingPool.size();
   for (unsigned i=0;i < boundedSize; i++) {
-    clonedBinding[i] = bindings[i];
+    cpBindingPool.push(bindings[i]);
   }
-  nextBins[bin].push(RecordedCheckPoint(
-    curLInfo,
-    std::move(clonedBinding),
-    tp
+  Stack<RecordedCheckPoint>& binStack = nextBins[bin];
+  if (binStack.isEmpty()) {
+    touchedBins.push(bin);
+  }
+  binStack.push(RecordedCheckPoint(
+    (unsigned)curLInfo,
+    (unsigned)tp,
+    bindOffset,
+    boundedSize
   ));
 }
 
