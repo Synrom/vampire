@@ -49,8 +49,8 @@ protected:
   struct InitialLiteralOrderingComparator;
 
   void optimizeLiteralOrder(DArray<Literal*>& lits);
-  void evalSharing(Literal* lit, CodeOp* startOp, size_t& sharedLen, size_t& unsharedLen, CodeOp*& nextOp, unsigned& splitNumber);
-  static void matchCode(CodeStack& code, CodeOp* startOp, size_t& matchedCnt, CodeOp*& nextOp, unsigned& splitNumber);
+  void evalSharing(Literal* lit, CodeOp* startOp, size_t& sharedLen, size_t& unsharedLen, CodeOp*& nextOp, size_t& length);
+  static void matchCode(CodeStack& code, CodeOp* startOp, size_t& matchedCnt, CodeOp*& nextOp);
 
   //////// removal //////////
 
@@ -168,6 +168,9 @@ class OptimizedClauseCodeTree
   using LitInfo = CodeTree::LitInfo;
   using MatchInfo = CodeTree::MatchInfo;
   using CodeBlock = CodeTree::CodeBlock;
+  using CodeStack = CodeTree::CodeStack;
+  using SearchStruct = CodeTree::SearchStruct;
+  using Base::matchCode;
 
 public:
   OptimizedClauseCodeTree() : Base() {}
@@ -177,6 +180,7 @@ public:
   void insert(Clause* cl);
   void remove(Clause* cl);
   void incorporate(CodeTree::CodeStack& code, ILStruct** matchedIls);
+  bool canMergeLiterals(CodeStack& code, unsigned startA, unsigned startB);
 
 protected:
   void checkILStructEnumeration();
@@ -185,6 +189,7 @@ protected:
   struct OptimizedLiteralMatcher
   : public CodeTree::Matcher</*removing*/false,false,higherOrder>
   {
+    using SLMatcher = CodeTree::SingleLiteralMatcher<higherOrder>;
     using Base = CodeTree::Matcher</*removing*/false,false,higherOrder>;
     using Base::op;
     using Base::_matched;
@@ -206,30 +211,23 @@ protected:
     USE_ALLOCATOR(OptimizedLiteralMatcher);
 
   private:
-    struct SingleMatcher
-    : public CodeTree::Matcher</*removing*/false,false,higherOrder>
-    {
-      using MatcherBase = CodeTree::Matcher</*removing*/false,false,higherOrder>;
-      using MatcherBase::op;
-      using MatcherBase::execute;
-      using MatcherBase::bindings;
-
-      void init(OptimizedClauseCodeTree* tree, CodeOp* entry_, LitInfo* linfo_);
-
-      LitInfo* linfo;
-    };
-
-    void recordMatch(SingleMatcher& m);
+    void recordMatch(SLMatcher& m);
     bool shouldIgnore(CodeOp* op) const;
 
     OptimizedClauseCodeTree* tree;
     Clause* query;
     size_t cnt;
     unsigned minRank;
+    /**
+     * State of a SingleLiteralMatcher in the merge:
+     * - 0 if it must be advanced to its next LIT_END/SUCCESS,
+     * - splitNumber+1 if it is stopped at a not-yet-returned LIT_END,
+     * - FINISHED_RANK if it has exhausted all alternatives.
+     */
     static const unsigned FINISHED_RANK=static_cast<unsigned>(-1);
     DArray<unsigned> ranks;
     Stack<CodeOp*> successes;
-    Stack<SingleMatcher> matchers;
+    Stack<SLMatcher> matchers;
   };
 
 public:

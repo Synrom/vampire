@@ -732,6 +732,9 @@ template<bool removing, bool checkRange, bool higherOrder>
 bool CodeTree::Matcher<removing, checkRange, higherOrder>::backtrack()
 {
   if(btStack.isEmpty()) {
+    if(linfoCnt==0) {
+      return false;
+    }
     curLInfo++;
     return prepareLiteral();
   }
@@ -760,8 +763,112 @@ bool CodeTree::Matcher<removing, checkRange, higherOrder>::prepareLiteral()
   return true;
 }
 
+template<bool higherOrder>
+void CodeTree::SingleLiteralMatcher<higherOrder>::init(CodeOp* entry_, LitInfo* linfo_,
+    bool yieldSuccesses_, unsigned maxVarCnt)
+{
+  linfo=linfo_;
+  yieldSuccesses=yieldSuccesses_;
+  fresh=true;
+
+  op=entry_;
+  ft=linfo_->ft;
+  tp=0;
+
+  bindings.ensure(maxVarCnt);
+  btStack.reset();
+}
+
+/**
+ * Execute the code of the tree on the single flat term of this matcher
+ * until a LIT_END or SUCCESS operation is reached (returning true) or
+ * all the alternatives are exhausted (returning false).
+ */
+template<bool higherOrder>
+bool CodeTree::SingleLiteralMatcher<higherOrder>::execute()
+{
+  if(fresh) {
+    fresh=false;
+  }
+  else {
+    //we backtrack from what we found in the previous run
+    if(!backtrack()) {
+      return false;
+    }
+  }
+
+  bool shouldBacktrack=false;
+  for(;;) {
+    if(op->alternative()) {
+      btStack.push(BTPoint(tp, op->alternative()));
+    }
+    switch(op->_instruction()) {
+      case SUCCESS_OR_FAIL:
+        if(op->isFail() || !yieldSuccesses) {
+          //successes are yielded only by the matcher of the first LitInfo
+          //(we don't want to yield the same thing for each query literal)
+          shouldBacktrack=true;
+          break;
+        }
+        return true;
+      case LIT_END:
+        return true;
+      case CHECK_GROUND_TERM:
+        shouldBacktrack=!doCheckGroundTerm();
+        break;
+      case CHECK_FUN:
+        shouldBacktrack=!doCheckFun();
+        break;
+      case ASSIGN_VAR:
+        shouldBacktrack=!doAssignVar();
+        break;
+      case CHECK_VAR:
+        shouldBacktrack=!doCheckVar();
+        break;
+      case SEARCH_STRUCT:
+        if(doSearchStruct()) {
+          //a new value of @b op is assigned, so restart the loop
+          continue;
+        }
+        else {
+          shouldBacktrack=true;
+        }
+        break;
+      default: {
+        ASSERTION_VIOLATION;
+      }
+    }
+    if(shouldBacktrack) {
+      if(!backtrack()) {
+        return false;
+      }
+      shouldBacktrack=false;
+    }
+    else {
+      //the SEARCH_STRUCT operation does not appear in CodeBlocks
+      ASS(!op->isSearchStruct());
+      //In each CodeBlock there is always either operation LIT_END or FAIL.
+      //As we haven't encountered one yet, we may safely increase the
+      //operation pointer
+      op++;
+    }
+  }
+}
+
+template<bool higherOrder>
+bool CodeTree::SingleLiteralMatcher<higherOrder>::backtrack()
+{
+  if(btStack.isEmpty()) {
+    return false;
+  }
+  BTPoint bp=btStack.pop();
+  tp=bp.tp;
+  op=bp.op;
+  return true;
+}
+
 template<bool removing, bool checkRange, bool higherOrder>
-inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doAssignVar()
+inline bool CodeTree::Executor<removing, checkRange, higherOrder>::doAssignVar()
 {
   ASS_EQ(op->_instruction(), ASSIGN_VAR);
 
@@ -802,7 +909,7 @@ inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doAssignVar()
 }
 
 template<bool removing, bool checkRange, bool higherOrder>
-inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doCheckVar()
+inline bool CodeTree::Executor<removing, checkRange, higherOrder>::doCheckVar()
 {
   ASS_EQ(op->_instruction(), CHECK_VAR);
 
@@ -834,7 +941,7 @@ inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doCheckVar()
 }
 
 template<bool removing, bool checkRange, bool higherOrder>
-inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doCheckFun()
+inline bool CodeTree::Executor<removing, checkRange, higherOrder>::doCheckFun()
 {
   ASS_EQ(op->_instruction(), CHECK_FUN);
 
@@ -849,7 +956,7 @@ inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doCheckFun()
 }
 
 template<bool removing, bool checkRange, bool higherOrder>
-inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doCheckGroundTerm()
+inline bool CodeTree::Executor<removing, checkRange, higherOrder>::doCheckGroundTerm()
 {
   ASS_EQ(op->_instruction(), CHECK_GROUND_TERM);
 
@@ -873,7 +980,7 @@ inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doCheckGroundT
 }
 
 template<bool removing, bool checkRange, bool higherOrder>
-inline bool CodeTree::Matcher<removing, checkRange, higherOrder>::doSearchStruct()
+inline bool CodeTree::Executor<removing, checkRange, higherOrder>::doSearchStruct()
 {
   ASS_EQ(op->_instruction(), SEARCH_STRUCT);
 
@@ -894,6 +1001,8 @@ template struct CodeTree::Matcher<true, false, true>;
 template struct CodeTree::Matcher<true, true, false>;
 template struct CodeTree::Matcher<false, false, false>;
 template struct CodeTree::Matcher<false, false, true>;
+template struct CodeTree::SingleLiteralMatcher<false>;
+template struct CodeTree::SingleLiteralMatcher<true>;
 
 //////////////// auxiliary ////////////////////
 
@@ -1156,6 +1265,34 @@ CodeTree::CodeBlock* CodeTree::buildBlock(CodeStack& code, size_t cnt, ILStruct*
     (*res)[i]=op;
   }
   return res;
+}
+
+CodeTree::CodeBlock* CodeTree::replaceBlock(CodeStack& code, size_t matchedCnt, CodeBlock* oldBlock)
+{
+  CodeBlock* newBlock = CodeBlock::allocate(code.length());
+  ILStruct* prev = nullptr;
+  for (size_t i=0; i < matchedCnt; i++) {
+    (*newBlock)[i] = (*oldBlock)[i];
+    if ((*newBlock)[i].isLitEnd()) {
+      prev = (*newBlock)[i].getILS();
+    }
+  }
+
+  for (size_t i=matchedCnt; i < code.length(); i++) {
+    (*newBlock)[i] = code[i];
+    if ((*newBlock)[i].isLitEnd()) {
+      (*newBlock)[i].getILS()->putIntoSequence(prev);
+      prev = (*newBlock)[i].getILS();
+    }
+  }
+  
+  CodeBlock* altBlock = CodeBlock::allocate(oldBlock->length() - matchedCnt);
+  for (size_t i=matchedCnt; i < oldBlock->length(); i++) {
+    (*altBlock)[i-matchedCnt] = (*oldBlock)[i];
+  }
+  oldBlock->deallocate();
+  (*newBlock)[matchedCnt].setAlternative(&(*altBlock)[0]);
+  return newBlock;
 }
 
 /**

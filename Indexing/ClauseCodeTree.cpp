@@ -108,7 +108,8 @@ void ClauseCodeTree<higherOrder>::optimizeLiteralOrder(DArray<Literal*>& lits)
   }
 
   lits.sort(InitialLiteralOrderingComparator());
-  unsigned splitNumber;
+
+  size_t length;
 
   CodeOp* entry=getEntryPoint();
   for(unsigned startIndex=0;startIndex<clen-1;startIndex++) {
@@ -119,14 +120,14 @@ void ClauseCodeTree<higherOrder>::optimizeLiteralOrder(DArray<Literal*>& lits)
     size_t bestSharedLen;
     bool bestGround=lits[startIndex]->ground();
     CodeOp* nextOp;
-    evalSharing(lits[startIndex], entry, bestSharedLen, unshared, nextOp, splitNumber);
+    evalSharing(lits[startIndex], entry, bestSharedLen, unshared, nextOp, length);
     if(!unshared) {
       goto have_best;
     }
 
     for(unsigned i=startIndex+1;i<clen;i++) {
       size_t sharedLen;
-      evalSharing(lits[i], entry, sharedLen, unshared, nextOp, splitNumber);
+      evalSharing(lits[i], entry, sharedLen, unshared, nextOp, length);
       if(!unshared) {
 	bestIndex=i;
         goto have_best;
@@ -153,14 +154,15 @@ void ClauseCodeTree<higherOrder>::optimizeLiteralOrder(DArray<Literal*>& lits)
 }
 
 template<bool higherOrder>
-void ClauseCodeTree<higherOrder>::evalSharing(Literal* lit, CodeOp* startOp, size_t& sharedLen, size_t& unsharedLen, CodeOp*& nextOp, unsigned& splitNumber)
+void ClauseCodeTree<higherOrder>::evalSharing(Literal* lit, CodeOp* startOp, size_t& sharedLen, size_t& unsharedLen, CodeOp*& nextOp, size_t& length)
 {
   CodeStack code;
   LitCompiler compiler(code);
 
   compiler.handleTerm(lit);
+  length = code.length();
 
-  matchCode(code, startOp, sharedLen, nextOp, splitNumber);
+  matchCode(code, startOp, sharedLen, nextOp);
 
   unsharedLen=code.size()-sharedLen;
 
@@ -178,10 +180,16 @@ void ClauseCodeTree<higherOrder>::evalSharing(Literal* lit, CodeOp* startOp, siz
  * proceed to (in this case it therefore holds that @b lastAttemptedOp->alternative==0 ).
  */
 template<bool higherOrder>
-void ClauseCodeTree<higherOrder>::matchCode(CodeStack& code, CodeOp* startOp, size_t& matchedCnt, CodeOp*& nextOp, unsigned& splitNumber)
+void ClauseCodeTree<higherOrder>::matchCode(CodeStack& code, CodeOp* startOp, size_t& matchedCnt, CodeOp*& nextOp)
 {
   size_t clen=code.length();
   CodeOp* treeOp=startOp;
+
+  if (clen == 0) {
+    matchedCnt = 0;
+    nextOp = startOp;
+    return;
+  }
 
   for(size_t i=0;i<clen;i++) {
     for(;;) {
@@ -197,24 +205,12 @@ void ClauseCodeTree<higherOrder>::matchCode(CodeStack& code, CodeOp* startOp, si
 	break;
       }
       ASS_NEQ(treeOp,treeOp->alternative());
-      if (!treeOp->alternative()) {
-        while (treeOp) {
-          if (treeOp->isLitEnd()) {
-            splitNumber = treeOp->getILS()->splitNumber;
-          }
-          if (treeOp->alternative()) {
-            treeOp = treeOp->alternative();
-          } else {
-            if (treeOp->isLitEnd() && !treeOp->getILS()->hasSuccessor) break;
-            if (treeOp->isSuccess() || treeOp->isFail()) break;
-            treeOp++;
-          }
-        }
+      treeOp=treeOp->alternative();
+      if (!treeOp) {
         matchedCnt=i;
         nextOp=0;
         return;
       }
-      treeOp=treeOp->alternative();
     }
 
     //the SEARCH_STRUCT operation does not occur in a CodeBlock
@@ -224,9 +220,6 @@ void ClauseCodeTree<higherOrder>::matchCode(CodeStack& code, CodeOp* startOp, si
     //either (as each code block contains at least one FAIL or SUCCESS
     //operation, and CodeStack contains at most one SUCCESS as the last
     //operation)
-    if (treeOp->isLitEnd()) {
-      splitNumber = treeOp->getILS()->splitNumber;
-    }
     treeOp++;
   }
   treeOp--;
@@ -378,39 +371,44 @@ void OptimizedClauseCodeTree<higherOrder>::optimizeLiteralOrder(DArray<Literal*>
   for(unsigned startIndex=0;startIndex<clen-1;startIndex++) {
 //  for(unsigned startIndex=0;startIndex<1;startIndex++) {
 
+    size_t unshared=1;
     unsigned bestIndex=startIndex;
     size_t bestSharedLen;
-    unsigned bestSplitNumber;
-    size_t bestUnshared;
-    CodeTree::CodeOp* bestNextOp;
-    this->evalSharing(lits[startIndex], entry, bestSharedLen, bestUnshared, bestNextOp, bestSplitNumber);
+    size_t bestLen;
+    bool bestGround=lits[startIndex]->ground();
+    CodeTree::CodeOp* nextOp;
+    this->evalSharing(lits[startIndex], entry, bestSharedLen, unshared, nextOp, bestLen);
+    if(!unshared) {
+      goto have_best;
+    }
 
     for(unsigned i=startIndex+1;i<clen;i++) {
       size_t sharedLen;
-      unsigned splitNumber;
-      size_t unshared;
-      CodeTree::CodeOp* nextOp;
-      this->evalSharing(lits[i], entry, sharedLen, unshared, nextOp, splitNumber);
-
-      if(splitNumber < bestSplitNumber) {
+      size_t len;
+      this->evalSharing(lits[i], entry, sharedLen, unshared, nextOp, len);
+      if(!unshared) {
+	      bestIndex=i;
+        goto have_best;
+      }
+      if(sharedLen>bestSharedLen || (sharedLen == bestSharedLen && len < bestLen)) {
 //	cout<<lits[i]->toString()<<" is better than "<<lits[bestIndex]->toString()<<endl;
 	bestSharedLen=sharedLen;
 	bestIndex=i;
-  bestSplitNumber = splitNumber;
-  bestUnshared = unshared;
-  bestNextOp = nextOp;
+  bestLen = len;
+	bestGround=lits[i]->ground();
       }
     }
 
+  have_best:
     swap(lits[startIndex],lits[bestIndex]);
 
-    if(bestUnshared) {
+    if(unshared) {
       //we haven't matched the whole literal, so we won't proceed with the next one
       unsharedIndex = startIndex;
       break;
     }
-    ASS(bestNextOp);
-    entry=bestNextOp;
+    ASS(nextOp);
+    entry=nextOp;
   }
   
 optimize_intra_clausal_order:
@@ -528,7 +526,7 @@ void OptimizedClauseCodeTree<higherOrder>::insert(Clause* cl)
       }
     }
 
-    if (matchedWeight > nextLitAlternativeThreshold && !lastLiteralWasMerged) {
+    if (matchedWeight > nextLitAlternativeThreshold && !lastLiteralWasMerged && canMergeLiterals(code, loffset, roffset)) {
       lastLiteralWasMerged = true;
       ILStruct* prev;
       CodeTree::CodeStack insertedCode(roffset);
@@ -569,6 +567,130 @@ void OptimizedClauseCodeTree<higherOrder>::insert(Clause* cl)
   incorporate(code, nullptr);
   ASS(code.isEmpty());
   checkILStructEnumeration();
+}
+
+template<bool higherOrder>
+bool OptimizedClauseCodeTree<higherOrder>::canMergeLiterals(CodeStack& code, unsigned startA, unsigned startB)
+{
+  ASS_L(startA, startB);
+  ASS_L(startB, code.length());
+  if (this->isEmpty()) {
+    return true;
+  }
+
+  size_t matchedCnt;
+  CodeOp* commonEntry;
+  CodeStack prefixCode(startA);
+  for (unsigned i=0; i < startA; i++) {
+    prefixCode.push(code[i]);
+  }
+  matchCode(prefixCode, this->getEntryPoint(), matchedCnt, commonEntry);
+  if (matchedCnt < startA) {
+    return true;
+  }
+  ASS(commonEntry);
+
+  CodeOp* treeOp = commonEntry;
+  CodeOp* tailTarget = nullptr;
+  ILStruct* ilsA = nullptr;
+  for(size_t i=startA;i<startB;i++) {
+    for(;;) {
+      if(treeOp->isSearchStruct()) {
+        SearchStruct* ss=treeOp->getSearchStruct();
+        CodeOp** toPtr;
+        if(ss->getTargetOpPtr<false>(code[i], toPtr) && *toPtr) {
+          treeOp=*toPtr;
+          continue;
+        }
+      }
+      else if(code[i].equalsForOpMatching(*treeOp)) {
+	      break;
+      }
+      ASS_NEQ(treeOp,treeOp->alternative());
+      if (!treeOp->alternative()) {
+        tailTarget = treeOp;
+      } 
+      treeOp=treeOp->alternative();
+      if (!treeOp) break;
+    }
+    if (!treeOp) break;
+    ASS(!treeOp->isSearchStruct());
+    if (treeOp->isLitEnd()) {
+      ilsA = treeOp->getILS(); 
+    }
+    treeOp++;
+  }
+  if (!ilsA) {
+    ASS(tailTarget);
+    treeOp = tailTarget;
+    while (treeOp) {
+      if (treeOp->isLitEnd()) {
+        ilsA = treeOp->getILS();
+      }
+      if (treeOp->alternative()) {
+        treeOp = treeOp->alternative();
+      } else {
+        if (treeOp->hasSuccessor()) {
+          treeOp++;
+        } else {
+          treeOp = nullptr;
+        }
+      }
+    }
+  }
+
+  treeOp = commonEntry;
+  tailTarget = nullptr;
+  ILStruct* ilsB = nullptr;
+  for(size_t i=startB;i<code.length();i++) {
+    for(;;) {
+      if(treeOp->isSearchStruct()) {
+        SearchStruct* ss=treeOp->getSearchStruct();
+        CodeOp** toPtr;
+        if(ss->getTargetOpPtr<false>(code[i], toPtr) && *toPtr) {
+          treeOp=*toPtr;
+          continue;
+        }
+      }
+      else if(code[i].equalsForOpMatching(*treeOp)) {
+	      break;
+      }
+      ASS_NEQ(treeOp,treeOp->alternative());
+      if (!treeOp->alternative()) {
+        tailTarget = treeOp;
+      } 
+      treeOp=treeOp->alternative();
+      if (!treeOp) break;
+    }
+    if (!treeOp) break;
+    ASS(!treeOp->isSearchStruct());
+    if (treeOp->isLitEnd()) {
+      ilsB = treeOp->getILS(); 
+    }
+    treeOp++;
+  }
+  if (!ilsB) {
+    ASS(tailTarget);
+    treeOp = tailTarget;
+    while (treeOp) {
+      if (treeOp->isLitEnd()) {
+        ilsB = treeOp->getILS();
+      }
+      if (treeOp->alternative()) {
+        treeOp = treeOp->alternative();
+      } else {
+        if (treeOp->hasSuccessor()) {
+          treeOp++;
+        } else {
+          treeOp = nullptr;
+        }
+      }
+    }
+  }
+
+  ASS(ilsA);
+  ASS(ilsB);
+  return ilsA->splitNumber <= ilsB->splitNumber;
 }
 
 template<bool higherOrder>
@@ -696,6 +818,7 @@ void OptimizedClauseCodeTree<higherOrder>::incorporate(CodeTree::CodeStack& code
   size_t matchedCnt;
   CodeTree::ILStruct* lastMatchedILS=0;
   CodeTree::CodeOp** currentBlockReference = nullptr;
+  unsigned lastBlockMatchedCnt = 0;
   bool appendToBlock = false;
 
   {
@@ -718,6 +841,7 @@ void OptimizedClauseCodeTree<higherOrder>::incorporate(CodeTree::CodeStack& code
               goto matching_done;
             }
             currentBlockReference = toPtr;
+            lastBlockMatchedCnt = 0;
             treeOp = *toPtr;
             continue;
           }
@@ -729,6 +853,7 @@ void OptimizedClauseCodeTree<higherOrder>::incorporate(CodeTree::CodeStack& code
         if (treeOp->alternative()) {
           //try alternative if there is some
           currentBlockReference = &treeOp->alternative();
+          lastBlockMatchedCnt = 0;
           treeOp = treeOp->alternative();
         } else {
           //matching failed, we'll add the new branch here
@@ -772,6 +897,7 @@ void OptimizedClauseCodeTree<higherOrder>::incorporate(CodeTree::CodeStack& code
         */
       } // for(;;)
 
+      lastBlockMatchedCnt++;
       if (treeOp->isLitEnd()) {
         lastMatchedILS = treeOp->getILS();
         if (!treeOp->getILS()->hasSuccessor) {
@@ -1080,15 +1206,16 @@ void OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::init(Optimiz
   }
 
   cnt=linfoCnt_;
-  minRank=0;
+  minRank=0; //all matchers are fresh
   ranks.ensure(cnt);
+  //the SingleLiteralMatchers of previous uses are kept around and reused
   while(matchers.size()<cnt) {
-    matchers.push(SingleMatcher());
+    matchers.push(SLMatcher());
   }
   unsigned* rankArr=ranks.array();
-  SingleMatcher* mArr=matchers.begin();
+  SLMatcher* mArr=matchers.begin();
   for(size_t i=0;i<cnt;i++) {
-    mArr[i].init(tree_, entry_, &linfos_[i]);
+    mArr[i].init(entry_, &linfos_[i], i==0, tree_->_maxVarCnt);
     rankArr[i]=0;
   }
 }
@@ -1106,7 +1233,7 @@ bool OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::next()
   }
 
   if(cnt==1) {
-    SingleMatcher* m=matchers.begin();
+    SLMatcher* m=matchers.begin();
     for(;;) {
       if(!m->execute()) {
         _matched=false;
@@ -1125,7 +1252,7 @@ bool OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::next()
   }
 
   unsigned* rankArr=ranks.array();
-  SingleMatcher* mArr=matchers.begin();
+  SLMatcher* mArr=matchers.begin();
   for(;;) {
     if(minRank==FINISHED_RANK) {
       _matched=false;
@@ -1135,7 +1262,7 @@ bool OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::next()
     unsigned newMin=FINISHED_RANK;
     for(size_t i=0;i<cnt;i++) {
       if(rankArr[i]==0) {
-        SingleMatcher* m=&mArr[i];
+        SLMatcher* m=&mArr[i];
         if(!m->execute()) {
           rankArr[i]=FINISHED_RANK;
         }
@@ -1192,15 +1319,6 @@ bool OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::next()
 }
 
 template<bool higherOrder>
-void OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::SingleMatcher::init(
-    OptimizedClauseCodeTree* tree, CodeOp* entry_, LitInfo* linfo_)
-{
-  linfo=linfo_;
-  MatcherBase::init(tree, entry_, linfo_, 1);
-  ALWAYS(MatcherBase::prepareLiteral());
-}
-
-template<bool higherOrder>
 bool OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::shouldIgnore(CodeOp* op) const
 {
   ASS(op->isLitEnd());
@@ -1217,7 +1335,7 @@ bool OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::shouldIgnore
 }
 
 template<bool higherOrder>
-void OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::recordMatch(SingleMatcher& m)
+void OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::recordMatch(SLMatcher& m)
 {
   ILStruct* ils=m.op->getILS();
   ils->ensureFreshness(tree->_curTimeStamp);

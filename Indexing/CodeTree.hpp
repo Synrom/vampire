@@ -200,7 +200,7 @@ public:
     inline bool isSearchStruct() const { return _instruction()==SEARCH_STRUCT; }
     inline bool isCheckFun() const { return _instruction()==CHECK_FUN; }
     inline bool isCheckGroundTerm() const { return _instruction()==CHECK_GROUND_TERM; }
-    inline bool hasSuccessor() const { return _instruction() == SUCCESS_OR_FAIL || (isLitEnd() && getILS()->hasSuccessor); }
+    inline bool hasSuccessor() const { return !(_instruction() == SUCCESS_OR_FAIL || isLitEnd()) || (isLitEnd() && getILS()->hasSuccessor); }
 
     inline Term* getTargetTerm() const
     {
@@ -326,6 +326,75 @@ public:
   struct NonRemovingBase {};
 
   /**
+   * Backtracking point for the interpretation of the code tree.
+   */
+  struct BTPoint
+  {
+    BTPoint(size_t tp, CodeOp* op) : tp(tp), op(op) {}
+
+    /** Position in the flat term */
+    size_t tp;
+    /** Pointer to the next operation */
+    CodeOp* op;
+  };
+
+  struct BTPointRemoving
+  {
+    BTPointRemoving(size_t tp, CodeOp* op, size_t fibDepth)
+    : tp(tp), op(op), fibDepth(fibDepth) {}
+
+    size_t tp;
+    CodeOp* op;
+    size_t fibDepth;
+  };
+
+  /**
+   * State and elementary operations for interpreting the code of the tree
+   * on a single flat term.
+   *
+   * This is the common base of @b Matcher (which iterates over an array of
+   * LitInfo objects) and @b SingleLiteralMatcher (which is bound to a single
+   * LitInfo object).
+   */
+  template<bool removing, bool checkRange, bool higherOrder>
+  struct Executor
+    : public std::conditional<removing, RemovingBase, NonRemovingBase>::type
+  {
+    // we only want to enable checkRange if
+    // removing, which works on variables
+    static_assert(removing || !checkRange);
+
+    /**
+     * Pointer to the current operation
+     *
+     * Must be initialized by inheritor.
+     */
+    CodeOp* op;
+
+    BindingArray bindings;
+
+  protected:
+    bool doAssignVar();
+    bool doCheckVar();
+    bool doCheckFun();
+    bool doCheckGroundTerm();
+    bool doSearchStruct();
+
+    /**
+     * Position in the flat term
+     *
+     * Must be initialized by inheritor.
+     */
+    size_t tp;
+    /**
+     * Flat term to be traversed
+     *
+     * Must be initialized by inheritor.
+     */
+    FlatTerm* ft;
+  };
+
+  /**
    * Context for finding matches of literals
    *
    * Here the actual execution of the code of the tree takes place.
@@ -338,50 +407,17 @@ public:
    */
   template<bool removing, bool checkRange, bool higherOrder>
   struct Matcher
-    : public std::conditional<removing, RemovingBase, NonRemovingBase>::type
+    : public Executor<removing, checkRange, higherOrder>
   {
-    // we only want to enable checkRange if
-    // removing, which works on variables
-    static_assert(removing || !checkRange);
-
-    /**
-     * Backtracking point for the interpretation of the code tree.
-     */
-    struct BTPoint
-    {
-      BTPoint(size_t tp, CodeOp* op) : tp(tp), op(op) {}
-
-      /** Position in the flat term */
-      size_t tp;
-      /** Pointer to the next operation */
-      CodeOp* op;
-    };
-
-    struct BTPointRemoving
-    {
-      BTPointRemoving(size_t tp, CodeOp* op, size_t fibDepth)
-      : tp(tp), op(op), fibDepth(fibDepth) {}
-
-      size_t tp;
-      CodeOp* op;
-      size_t fibDepth;
-    };
+    using Exec = Executor<removing, checkRange, higherOrder>;
+    using Exec::op;
+    using Exec::bindings;
 
     inline bool finished() const { return !fresh && !_matched; }
     inline bool matched() const { return _matched && op->isLitEnd(); }
     inline bool success() const { return _matched && op->isSuccess(); }
 
     bool execute();
-
-    /**
-     * Pointer to the current operation
-     *
-     * Must be initialized by inheritor (either directly or by
-     * a call to the @b prepareLiteral function).
-     */
-    CodeOp* op;
-
-    BindingArray bindings;
 
     bool keepRecycled() const
     {
@@ -394,31 +430,19 @@ public:
     }
 
   protected:
+    using Exec::tp;
+    using Exec::ft;
+    using Exec::doAssignVar;
+    using Exec::doCheckVar;
+    using Exec::doCheckFun;
+    using Exec::doCheckGroundTerm;
+    using Exec::doSearchStruct;
+
     void init(CodeTree* tree_, CodeOp* entry_, LitInfo* linfos_ = 0,
       size_t linfoCnt_ = 0, Stack<CodeOp*>* firstsInBlocks_ = 0);
 
     bool backtrack();
     bool prepareLiteral();
-    bool doAssignVar();
-    bool doCheckVar();
-    bool doCheckFun();
-    bool doCheckGroundTerm();
-    bool doSearchStruct();
-
-    /**
-     * Position in the flat term
-     *
-     * Must be initialized by inheritor (either directly or by
-     * a call to the @b prepareLiteral function).
-     */
-    size_t tp;
-    /**
-     * Flat term to be traversed
-     *
-     * Must be initialized by inheritor (either directly or by
-     * a call to the @b prepareLiteral function).
-     */
-    FlatTerm* ft;
 
     /** the matcher object is initialized but no execution of code was done yet */
     bool fresh;
@@ -448,6 +472,53 @@ public:
      * are used (they are not in TermCodeTree::TermMatcher).
      */
     size_t curLInfo;
+  };
+
+  /**
+   * Matcher bound to a single LitInfo object, used by optimized literal
+   * matchers which merge several per-LitInfo executions.
+   *
+   * Compared to @b Matcher it carries no LitInfo iteration state, so it
+   * is lighter and its @b execute loop is simpler.
+   */
+  template<bool higherOrder>
+  struct SingleLiteralMatcher
+    : public Executor</*removing*/false, false, higherOrder>
+  {
+    using Exec = Executor<false, false, higherOrder>;
+    using Exec::op;
+    using Exec::bindings;
+
+    void init(CodeOp* entry_, LitInfo* linfo_, bool yieldSuccesses_, unsigned maxVarCnt);
+    bool execute();
+
+    bool keepRecycled() const { return bindings.keepRecycled() || btStack.keepRecycled(); }
+
+    /** the LitInfo object this matcher is matching */
+    LitInfo* linfo;
+
+    USE_ALLOCATOR(SingleLiteralMatcher);
+
+  private:
+    using Exec::tp;
+    using Exec::ft;
+    using Exec::doAssignVar;
+    using Exec::doCheckVar;
+    using Exec::doCheckFun;
+    using Exec::doCheckGroundTerm;
+    using Exec::doSearchStruct;
+
+    bool backtrack();
+
+    /** no execution of code was done yet */
+    bool fresh;
+    /**
+     * SUCCESS operations are yielded only by the matcher of the first
+     * LitInfo (so that they are not yielded once for each query literal)
+     */
+    bool yieldSuccesses;
+
+    Stack<BTPoint> btStack;
   };
 
   //////// auxiliary methods //////////
@@ -491,6 +562,7 @@ public:
 
   static CodeBlock* buildBlock(CodeStack& code, size_t cnt, ILStruct* prev);
   static CodeBlock* appendBlock(CodeStack& code, size_t cnt, CodeBlock* oldBlock);
+  static CodeBlock* replaceBlock(CodeStack& code, size_t matchedCnt, CodeBlock* oldBlock);
   void incorporate(CodeStack& code);
 
   template<SearchStruct::Kind k>

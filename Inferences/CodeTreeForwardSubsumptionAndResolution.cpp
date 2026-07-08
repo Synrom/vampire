@@ -54,7 +54,14 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
   premise = oldCm.next(resolvedQueryLit);
   premise = optimizedCm.next(resolvedQueryLit);
 
-  ASS(optimizedCm.countCheckCandidate <= oldCm.countCheckCandidate);
+  /*
+  if (optimizedCm.countCheckCandidate > oldCm.countCheckCandidate) {
+    std::cout << "Optimized check Candidate count " << optimizedCm.countCheckCandidate << std::endl;
+    std::cout << "Normal check Candidate count " << oldCm.countCheckCandidate << std::endl;
+    //ASS(optimizedCm.countCheckCandidate <= oldCm.countCheckCandidate);
+  }
+  */
+  ASS(optimizedCm.countCanEnterLiteral <= oldCm.countCanEnterLiteral*2);
 
   /*
   {

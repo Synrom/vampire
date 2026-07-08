@@ -235,6 +235,8 @@ TEST_FUN(insertion)
 TEST_FUN(CheckCorrectBin3)
 {
   __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION)
+
+
   std::vector<Kernel::Clause*> clauses;
   clauses.push_back(clause({p2(c,d), p2(c,e)}));
   clauses.push_back(clause({p2(e,d), p2(e,e)}));
@@ -245,6 +247,14 @@ TEST_FUN(CheckCorrectBins2)
 {
   // C1 = {p2(c,c)}, C2 = {p2(c,d), p2(c,e)}
   __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION)
+  OptimizedClauseCodeTree<false> wtree;
+  Kernel::Clause* C1 = clause({p2(c,c)});
+  wtree.insert(C1);
+  std::cout << wtree << std::endl;
+  Kernel::Clause* C2 = clause({p2(c,d), p2(c,e)});
+  wtree.insert(C2);
+  std::cout << wtree << std::endl;
+
   std::vector<Kernel::Clause*> clauses;
   clauses.push_back(clause({p2(c,c)}));
   clauses.push_back(clause({p2(c,d), p2(c,e)}));
@@ -302,6 +312,14 @@ TEST_FUN(InsertLongerPrefixOverlap)
 {
   // C1 = { p(c,d,e), p(c,e,e) }, C2 = { p(c,d,e), p(c,d,e2) }
   __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION)
+  OptimizedClauseCodeTree<false> tree;
+  Kernel::Clause* C1 = clause({ p3(c,d,e), p3(c,e,e) });
+  Kernel::Clause* C2 = clause({ p3(c,d,e), p3(c,d,e2) });
+  tree.insert(C1);
+  std::cout << tree << std::endl;
+  tree.insert(C2);
+  std::cout << tree << std::endl;
+
   std::vector<Kernel::Clause*> clauses;
   clauses.push_back(clause({ p3(c,d,e), p3(c,e,e) }));
   clauses.push_back(clause({ p3(c,d,e), p3(c,d,e2) }));
@@ -358,6 +376,14 @@ TEST_FUN(AddPrefixOfPriorClause)
 {
   // add clause that has three literals with next op between 2nd and third literal. Then add same clause with only 2 literals
   __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION)
+  OptimizedClauseCodeTree<false> tree;
+  Kernel::Clause* C1 = clause({p2(c,c), p2(d,d), p2(d,e) });
+  Kernel::Clause* C2 = clause({p2(c,c), p2(d,d) });
+  tree.insert(C1);
+  std::cout << tree << std::endl;
+  tree.insert(C2);
+  std::cout << tree << std::endl;
+
   std::vector<Kernel::Clause*> clauses;
   clauses.push_back(clause({p2(c,c), p2(d,d), p2(d,e) }));
   clauses.push_back(clause({p2(c,c), p2(d,d) }));
@@ -1521,8 +1547,14 @@ TEST_FUN(BigReproducer)
   clauses.push_back(clause({~p(f2(x2,f2(x3,x1))), ~p(x1), p(f2(x3,x2))}));
   clauses.push_back(clause({p(f2(f2(x2,f2(x1,x3)),x3)), ~p(f2(x1,x2))}));
   clauses.push_back(clause({p(f2(x2,f2(x1,f2(x2,x3)))), ~p(x1), ~p(x3)}));
+  clauses.push_back(clause({~p(f2(x2,f2(x1,x3))), ~p(f2(x1,x2)), p(x3)}));
+  clauses.push_back(clause({~p(f2(x3,x2)), ~p(x2), ~p(x1), p(f2(x1,x3))}));
+  clauses.push_back(clause({p(f2(x1,f2(x3,x2))), ~p(x2), ~p(x3), ~p(x1)}));
+  clauses.push_back(clause({~p(d)}));
+  clauses.push_back(clause({p(f2(x4,f2(x2,f2(x1,f2(x4,x3))))), ~p(x3), ~p(f2(x1,x2))}));
+  clauses.push_back(clause({p(f2(x2,x1)), ~p(x2), ~p(x1)}));
 
-  Kernel::Clause* D = clause({~p(x1), ~p(x2), ~p(f2(x3,x2)), p(f2(x1,x3))});
+  Kernel::Clause* D = clause({~p(x1), ~p(x2), ~p(x3), p(f2(x3,x1))});
 
   OptimizedClauseCodeTree<false> optimized_tree;
   for (Kernel::Clause* C : clauses) {
@@ -1540,10 +1572,91 @@ TEST_FUN(BigReproducer)
   ClauseCodeTree<false>::ClauseMatcher m;
   m.init(&tree, D, true);
   m.next(resolvedQueryLit);
-  ASS(optimized_m.countCheckCandidate <= m.countCheckCandidate);
+  ASS(optimized_m.countCanEnterLiteral <= m.countCanEnterLiteral*2);
 }
 
 TEST_FUN(BigReproducerMinimized)
+{
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION);
+  OptimizedClauseCodeTree<false> wtree;
+  std::vector<Kernel::Clause*> clauses;
+  clauses.push_back(clause({ ~p(f2(x2,x1)), p(x1) }));
+  clauses.push_back(clause({ ~p(x1) }));
+  Kernel::Clause* D = clause({ ~p(x3), p(f2(x3,x1)) });
+
+  OptimizedClauseCodeTree<false> optimized_tree;
+  for (Kernel::Clause* C : clauses) {
+    optimized_tree.insert(C);
+  }
+  ClauseCodeTree<false> tree;
+  for (Kernel::Clause* C : clauses) {
+    tree.insert(C);
+  }
+
+  std::cout << "Optimized tree" << std::endl << optimized_tree << std::endl;
+  std::cout << "Normal tree" << std::endl << tree << std::endl;
+
+  OptimizedClauseCodeTree<false>::OptimizedClauseMatcher optimized_m;
+  optimized_m.init(&optimized_tree, D, true);
+  int resolvedQueryLit;
+  optimized_m.next(resolvedQueryLit);
+  
+  ClauseCodeTree<false>::ClauseMatcher m;
+  m.init(&tree, D, true);
+  m.next(resolvedQueryLit);
+  
+  std::cout << "Optimized can enter literal " << optimized_m.countCanEnterLiteral << std::endl;
+  std::cout << "Normal can enter literal " << m.countCanEnterLiteral << std::endl;
+  ASS(optimized_m.countCanEnterLiteral <= m.countCanEnterLiteral*2);
+}
+
+TEST_FUN(TestAlternativesAreLongerOptimization) {
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION);
+  OptimizedClauseCodeTree<false> wtree;
+  Kernel::Clause* C1 = clause({p2(c,c)});
+  Kernel::Clause* C2 = clause({p(c)});
+  wtree.insert(C1);
+  std::cout << wtree << std::endl;
+  wtree.insert(C2);
+  std::cout << wtree << std::endl;
+}
+
+TEST_FUN(PrioritizePrefixSharingOverLiteralMerging)
+{
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION);
+  OptimizedClauseCodeTree<false> wtree;
+  std::vector<Kernel::Clause*> clauses;
+  clauses.push_back(clause({ ~p(f2(f2(f2(c,f2(d,e)),e),f2(d,c))) }));
+  clauses.push_back(clause({ p(f2(x1,f2(f2(x2,f2(x3,x1)),f2(x3,x2)))) }));
+  clauses.push_back(clause({ p(f2(x1,f2(x3,x2))), ~p(x1) }));
+  Kernel::Clause* D = clause({ ~p(d) });
+
+  OptimizedClauseCodeTree<false> optimized_tree;
+  for (Kernel::Clause* C : clauses) {
+    optimized_tree.insert(C);
+  }
+  ClauseCodeTree<false> tree;
+  for (Kernel::Clause* C : clauses) {
+    tree.insert(C);
+  }
+
+  std::cout << "Optimized Tree" << std::endl << optimized_tree << std::endl;
+  std::cout << "Normal Tree" << std::endl << tree << std::endl;
+
+  OptimizedClauseCodeTree<false>::OptimizedClauseMatcher optimized_m;
+  optimized_m.init(&optimized_tree, D, true);
+  int resolvedQueryLit;
+  optimized_m.next(resolvedQueryLit);
+
+  
+  ClauseCodeTree<false>::ClauseMatcher m;
+  m.init(&tree, D, true);
+  m.next(resolvedQueryLit);
+  std::cout << "Optimized can enter literal " << optimized_m.countCanEnterLiteral << std::endl;
+  std::cout << "Normal can enter literal " << m.countCanEnterLiteral << std::endl;
+  ASS(optimized_m.countCanEnterLiteral <= m.countCanEnterLiteral*2);
+}
+TEST_FUN(CheckSuccessesAreReturnedOnlyOnce)
 {
   __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION);
   OptimizedClauseCodeTree<false> wtree;
