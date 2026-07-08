@@ -151,6 +151,7 @@ public:
     bool visited;
     bool finished;
     bool noNonOppositeMatches;
+    unsigned lmsIndex;
   private:
     DArray<MatchInfo*> matches;
   };

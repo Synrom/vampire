@@ -49,7 +49,7 @@ protected:
   struct InitialLiteralOrderingComparator;
 
   void optimizeLiteralOrder(DArray<Literal*>& lits);
-  void evalSharing(Literal* lit, CodeOp* startOp, size_t& sharedLen, size_t& unsharedLen, CodeOp*& nextOp, size_t& length);
+  void evalSharing(Literal* lit, CodeOp* startOp, size_t& sharedLen, size_t& unsharedLen, CodeOp*& nextOp);
   static void matchCode(CodeStack& code, CodeOp* startOp, size_t& matchedCnt, CodeOp*& nextOp);
 
   //////// removal //////////
@@ -185,49 +185,36 @@ public:
 protected:
   void checkILStructEnumeration();
 
-  /** Literal matcher that merges one single-literal matcher per LitInfo. */
+  /** Context for finding matches of literals. */
   struct OptimizedLiteralMatcher
   : public CodeTree::Matcher</*removing*/false,false,higherOrder>
   {
-    using SLMatcher = CodeTree::SingleLiteralMatcher<higherOrder>;
     using Base = CodeTree::Matcher</*removing*/false,false,higherOrder>;
     using Base::op;
     using Base::_matched;
+    using Base::matched;
+    using Base::success;
+    using Base::finished;
     using Base::execute;
-    using Base::entry;
-    using Base::fresh;
 
-    void init(OptimizedClauseCodeTree* tree, Clause* query_, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess=false);
+    void init(OptimizedClauseCodeTree* tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, unsigned depth_, unsigned lmsIndex_, bool seekOnlySuccess=false);
     bool next();
-    bool doEagerMatching() { ASSERTION_VIOLATION; return false; }
+    bool doEagerMatching();
 
-    inline bool eagerlyMatched() const { return true; }
-    inline bool matched() const { return _matched && op->isLitEnd(); }
-    inline bool success() const { return _matched && op->isSuccess(); }
-    inline bool finished() const { return minRank==FINISHED_RANK; }
+    inline bool eagerlyMatched() const { return _eagerlyMatched; }
 
-    inline ILStruct* getILS() { ASS(matched()); return op->getILS(); }
+    inline ILStruct* getILS() { ASS(this->matched()); return op->getILS(); }
 
     USE_ALLOCATOR(OptimizedLiteralMatcher);
 
   private:
-    void recordMatch(SLMatcher& m);
-    bool shouldIgnore(CodeOp* op) const;
+    bool _eagerlyMatched;
+    unsigned depth;
+    unsigned lmsIndex;
 
-    OptimizedClauseCodeTree* tree;
-    Clause* query;
-    size_t cnt;
-    unsigned minRank;
-    /**
-     * State of a SingleLiteralMatcher in the merge:
-     * - 0 if it must be advanced to its next LIT_END/SUCCESS,
-     * - splitNumber+1 if it is stopped at a not-yet-returned LIT_END,
-     * - FINISHED_RANK if it has exhausted all alternatives.
-     */
-    static const unsigned FINISHED_RANK=static_cast<unsigned>(-1);
-    DArray<unsigned> ranks;
-    Stack<CodeOp*> successes;
-    Stack<SLMatcher> matchers;
+    Stack<CodeOp*> eagerResults;
+
+    void recordMatch();
   };
 
 public:
@@ -247,7 +234,7 @@ public:
     USE_ALLOCATOR(OptimizedClauseMatcher);
 
   private:
-    void enterLiteral(CodeOp* entry, bool seekOnlySuccess);
+    void enterLiteral(CodeOp* entry, unsigned depth, bool seekOnlySuccess);
     void leaveLiteral();
     bool canEnterLiteral(CodeOp* op);
 
@@ -284,7 +271,7 @@ protected:
    * consecutive literals for the next literal's code to be merged behind the
    * previous literal end as an alternative branch (and for reordering
    * literals to enable such merges). */
-  static const unsigned nextLitAlternativeThreshold = 1000;
+  static const unsigned nextLitAlternativeThreshold = 1;
 
   void optimizeLiteralOrder(DArray<Literal*>& lits);
   size_t evalSharingBetweenLiterals(Literal* lit1, Literal* lit2);
