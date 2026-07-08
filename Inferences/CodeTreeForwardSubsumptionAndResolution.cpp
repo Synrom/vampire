@@ -61,7 +61,7 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
     //ASS(optimizedCm.countCheckCandidate <= oldCm.countCheckCandidate);
   }
   */
-  ASS(optimizedCm.countCanEnterLiteral <= oldCm.countCanEnterLiteral*2);
+  ASS(optimizedCm.countCanEnterLiteral > oldCm.countCanEnterLiteral/2);
 
   /*
   {

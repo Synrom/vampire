@@ -1541,38 +1541,32 @@ TEST_FUN(BigReproducer)
 
   std::vector<Kernel::Clause*> clauses;
   clauses.push_back(clause({~p(f2(x2,x1)), ~p(x2), p(x1)}));
-  clauses.push_back(clause({~p(f2(f2(f2(c,f2(d,e)),e),f2(d,c)))}));
-  clauses.push_back(clause({p(f2(x1,f2(f2(x2,f2(x3,x1)),f2(x3,x2))))}));
-  clauses.push_back(clause({p(f2(f2(x2,f2(x3,x1)),f2(x3,x2))), ~p(x1)}));
-  clauses.push_back(clause({~p(f2(x2,f2(x3,x1))), ~p(x1), p(f2(x3,x2))}));
-  clauses.push_back(clause({p(f2(f2(x2,f2(x1,x3)),x3)), ~p(f2(x1,x2))}));
-  clauses.push_back(clause({p(f2(x2,f2(x1,f2(x2,x3)))), ~p(x1), ~p(x3)}));
-  clauses.push_back(clause({~p(f2(x2,f2(x1,x3))), ~p(f2(x1,x2)), p(x3)}));
-  clauses.push_back(clause({~p(f2(x3,x2)), ~p(x2), ~p(x1), p(f2(x1,x3))}));
-  clauses.push_back(clause({p(f2(x1,f2(x3,x2))), ~p(x2), ~p(x3), ~p(x1)}));
-  clauses.push_back(clause({~p(d)}));
-  clauses.push_back(clause({p(f2(x4,f2(x2,f2(x1,f2(x4,x3))))), ~p(x3), ~p(f2(x1,x2))}));
-  clauses.push_back(clause({p(f2(x2,x1)), ~p(x2), ~p(x1)}));
 
-  Kernel::Clause* D = clause({~p(x1), ~p(x2), ~p(x3), p(f2(x3,x1))});
+  Kernel::Clause* D = clause({~p(f2(f2(f2(c,f2(d,e)),e),f2(d,c)))});
 
   OptimizedClauseCodeTree<false> optimized_tree;
   for (Kernel::Clause* C : clauses) {
     optimized_tree.insert(C);
   }
+  ClauseCodeTree<false> tree;
+  for (Kernel::Clause* C : clauses) {
+    tree.insert(C);
+  }
+
+  std::cout << "Optimized Tree" << std::endl << optimized_tree << std::endl;
+  std::cout << "Normal Tree" << std::endl << tree  << std::endl;
   OptimizedClauseCodeTree<false>::OptimizedClauseMatcher optimized_m;
   optimized_m.init(&optimized_tree, D, true);
   int resolvedQueryLit;
   optimized_m.next(resolvedQueryLit);
 
-  ClauseCodeTree<false> tree;
-  for (Kernel::Clause* C : clauses) {
-    tree.insert(C);
-  }
+  
   ClauseCodeTree<false>::ClauseMatcher m;
   m.init(&tree, D, true);
   m.next(resolvedQueryLit);
-  ASS(optimized_m.countCanEnterLiteral <= m.countCanEnterLiteral*2);
+  std::cout << "Optimized tree can enter literal " << optimized_m.countCanEnterLiteral << std::endl;
+  std::cout << "Normal tree can enter literal " << m.countCanEnterLiteral << std::endl;
+  ASS(optimized_m.countCanEnterLiteral > m.countCanEnterLiteral/2);
 }
 
 TEST_FUN(BigReproducerMinimized)

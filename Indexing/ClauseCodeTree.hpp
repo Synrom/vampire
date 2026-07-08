@@ -284,7 +284,7 @@ protected:
    * consecutive literals for the next literal's code to be merged behind the
    * previous literal end as an alternative branch (and for reordering
    * literals to enable such merges). */
-  static const unsigned nextLitAlternativeThreshold = 1;
+  static const unsigned nextLitAlternativeThreshold = 1000;
 
   void optimizeLiteralOrder(DArray<Literal*>& lits);
   size_t evalSharingBetweenLiterals(Literal* lit1, Literal* lit2);
