@@ -49,8 +49,8 @@ protected:
   struct InitialLiteralOrderingComparator;
 
   void optimizeLiteralOrder(DArray<Literal*>& lits);
-  void evalSharing(Literal* lit, CodeOp* startOp, size_t& sharedLen, size_t& unsharedLen, CodeOp*& nextOp);
-  static void matchCode(CodeStack& code, CodeOp* startOp, size_t& matchedCnt, CodeOp*& nextOp);
+  void evalSharing(Literal* lit, CodeOp* startOp, size_t& sharedLen, size_t& unsharedLen, CodeOp*& nextOp, unsigned& splitNumber);
+  static void matchCode(CodeStack& code, CodeOp* startOp, size_t& matchedCnt, CodeOp*& nextOp, unsigned& splitNumber);
 
   //////// removal //////////
 
@@ -111,6 +111,8 @@ public:
     bool matched() { return lms.isNonEmpty() && lms.top()->success(); }
     CodeOp* getSuccessOp() { ASS(matched()); return lms.top()->op; }
 
+    unsigned countCanEnterLiteral=0;
+    unsigned countCheckCandidate=0;
     USE_ALLOCATOR(ClauseMatcher);
 
   private:
@@ -165,6 +167,7 @@ class OptimizedClauseCodeTree
   using CodeOp = CodeTree::CodeOp;
   using LitInfo = CodeTree::LitInfo;
   using MatchInfo = CodeTree::MatchInfo;
+  using CodeBlock = CodeTree::CodeBlock;
 
 public:
   OptimizedClauseCodeTree() : Base() {}
@@ -176,7 +179,9 @@ public:
   void incorporate(CodeTree::CodeStack& code, ILStruct** matchedIls);
 
 protected:
-  /** Literal matcher with early/future result forwarding. */
+  void checkILStructEnumeration();
+
+  /** Literal matcher that merges one single-literal matcher per LitInfo. */
   struct OptimizedLiteralMatcher
   : public CodeTree::Matcher</*removing*/false,false,higherOrder>
   {
@@ -187,48 +192,44 @@ protected:
     using Base::entry;
     using Base::fresh;
 
-    void init(OptimizedClauseCodeTree* tree, CodeOp* entry_, OptimizedLiteralMatcher* prev, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess=false);
+    void init(OptimizedClauseCodeTree* tree, Clause* query_, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess=false);
     bool next();
-    bool doEagerMatching();
+    bool doEagerMatching() { ASSERTION_VIOLATION; return false; }
 
-    inline bool eagerlyMatched() const { return _eagerlyMatched; }
-    inline bool finished() const { return op == nullptr || Base::finished(); }
+    inline bool eagerlyMatched() const { return true; }
+    inline bool matched() const { return _matched && op->isLitEnd(); }
+    inline bool success() const { return _matched && op->isSuccess(); }
+    inline bool finished() const { return minRank==FINISHED_RANK; }
 
-    inline ILStruct* getILS() { ASS(Base::matched()); return op->getILS(); }
+    inline ILStruct* getILS() { ASS(matched()); return op->getILS(); }
 
     USE_ALLOCATOR(OptimizedLiteralMatcher);
 
   private:
-    bool _eagerlyMatched;
-    /** the code of this literal's own entry has been executed to exhaustion */
-    bool _ownExhausted;
-    unsigned depth;
+    struct SingleMatcher
+    : public CodeTree::Matcher</*removing*/false,false,higherOrder>
+    {
+      using MatcherBase = CodeTree::Matcher</*removing*/false,false,higherOrder>;
+      using MatcherBase::op;
+      using MatcherBase::execute;
+      using MatcherBase::bindings;
 
-    /** The matcher of the previous literal, in case matches of this literal
-     * can be discovered inside merged alternative branches of its code
-     * (hasMergedAlt); such matches are pulled from it on demand. */
-    OptimizedLiteralMatcher* prevMatcher;
-    /** The lit end of prevMatcher we descended from; only matches whose
-     * ILStruct directly follows it belong to this matcher. */
-    ILStruct* prevIls;
+      void init(OptimizedClauseCodeTree* tree, CodeOp* entry_, LitInfo* linfo_);
 
-    /** Matches ready to be yielded: buffered by pullFromPrev of the next
-     * matcher and, once _eagerlyMatched, all remaining matches of this
-     * matcher. Consumed as a FIFO via eagerNext so that eager matching can
-     * push in discovery order without re-copying. */
-    Stack<CodeOp*> eagerResults;
-    size_t eagerNext;
-    /** SUCCESS ops found during eager matching or buffered by pullFromPrev
-     * of the next matcher; yielded before eagerResults as after them there
-     * may be no need for further clause retrieval. */
-    Stack<CodeOp*> successResults;
-    /** Lit ends of later literals (merged alternative branches) encountered
-     * while executing this literal's code; pulled by the next matcher. */
-    Stack<CodeOp*> futureResults;
+      LitInfo* linfo;
+    };
 
-    bool advance();
-    bool pullFromPrev();
-    void recordMatch();
+    void recordMatch(SingleMatcher& m);
+    bool shouldIgnore(CodeOp* op) const;
+
+    OptimizedClauseCodeTree* tree;
+    Clause* query;
+    size_t cnt;
+    unsigned minRank;
+    static const unsigned FINISHED_RANK=static_cast<unsigned>(-1);
+    DArray<unsigned> ranks;
+    Stack<CodeOp*> successes;
+    Stack<SingleMatcher> matchers;
   };
 
 public:
@@ -243,10 +244,12 @@ public:
     bool matched() { return lms.isNonEmpty() && lms.top()->success(); }
     CodeOp* getSuccessOp() { ASS(matched()); return lms.top()->op; }
 
+    unsigned countCanEnterLiteral=0;
+    unsigned countCheckCandidate=0;
     USE_ALLOCATOR(OptimizedClauseMatcher);
 
   private:
-    void enterLiteral(CodeOp* entry, bool seekOnlySuccess, OptimizedLiteralMatcher* prev);
+    void enterLiteral(CodeOp* entry, bool seekOnlySuccess);
     void leaveLiteral();
     bool canEnterLiteral(CodeOp* op);
 
@@ -283,7 +286,7 @@ protected:
    * consecutive literals for the next literal's code to be merged behind the
    * previous literal end as an alternative branch (and for reordering
    * literals to enable such merges). */
-  static const unsigned nextLitAlternativeThreshold = 6;
+  static const unsigned nextLitAlternativeThreshold = 1;
 
   void optimizeLiteralOrder(DArray<Literal*>& lits);
   size_t evalSharingBetweenLiterals(Literal* lit1, Literal* lit2);

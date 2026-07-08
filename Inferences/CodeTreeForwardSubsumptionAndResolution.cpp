@@ -49,12 +49,12 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
   oldResults.reset();
   optimizedResults.reset();
 
-  //std::cout << "Run on " << cl->toReproducerString() << std::endl;
+  std::cout << "Run on " << cl->toReproducerString() << std::endl;
 
   premise = oldCm.next(resolvedQueryLit);
-  std::cout << premise << std::endl;
   premise = optimizedCm.next(resolvedQueryLit);
 
+  ASS(optimizedCm.countCheckCandidate <= oldCm.countCheckCandidate);
 
   /*
   {

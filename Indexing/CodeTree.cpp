@@ -146,7 +146,7 @@ void CodeTree::MatchInfo::init(ILStruct* ils, unsigned liIndex_, DArray<TermList
 
 
 CodeTree::ILStruct::ILStruct(const Literal* lit, unsigned varCnt, Stack<unsigned>& gvnStack)
-: depth(0), previous(0), varCnt(varCnt), globalVarNumbers(0),
+: depth(0), previous(0), splitNumber(0), varCnt(varCnt), globalVarNumbers(0),
   sortedGlobalVarNumbers(0), globalVarPermutation(0), timestamp(0),
   matchCnt(0), visited(false), finished(false), noNonOppositeMatches(false)
 {
@@ -164,7 +164,7 @@ CodeTree::ILStruct::ILStruct(const Literal* lit, unsigned varCnt, Stack<unsigned
 }
 
 CodeTree::ILStruct::ILStruct(const ILStruct& o)
-: depth(o.depth), previous(o.previous), varCnt(o.varCnt), globalVarNumbers(0),
+: depth(o.depth), previous(o.previous), splitNumber(o.splitNumber), varCnt(o.varCnt), globalVarNumbers(0),
   sortedGlobalVarNumbers(0), hasSuccessor(o.hasSuccessor),
   hasMergedAlt(o.hasMergedAlt),
   globalVarPermutation(0), timestamp(o.timestamp), matchCnt(o.matchCnt),
@@ -360,7 +360,7 @@ void CodeTree::ILStruct::deleteMatch(unsigned matchIndex)
 
 CodeTree::MatchInfo*& CodeTree::ILStruct::getMatch(unsigned matchIndex)
 {
-  ASS(!finished);
+  //ASS(!finished);
   ASS_L(matchIndex, matchCnt);
   ASS(matches[matchIndex]);
 
@@ -463,7 +463,7 @@ void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litSt
       }
       break;
     case CodeTree::LIT_END:
-      out << GREEN << "lit end" << CRESET << " depth=" << op.getILS()->depth << " hasSuccessor=" << op.getILS()->hasSuccessor << " nrChildren=" << op.getILS()->nrChildren;
+      out << GREEN << "lit end" << CRESET << " depth=" << op.getILS()->depth << " hasSuccessor=" << op.getILS()->hasSuccessor << " nrChildren=" << op.getILS()->nrChildren << " splitNumber=" << op.getILS()->splitNumber;
       break;
     case CodeTree::CHECK_GROUND_TERM:
       out << YELLOW << "ground " << CRESET << *op.getTargetTerm();
@@ -1209,6 +1209,7 @@ CodeTree::CodeBlock* CodeTree::appendBlock(CodeStack& code, size_t cnt, CodeBloc
 void CodeTree::incorporate(CodeStack& code)
 {
   ASS(code.top().isSuccess());
+  _splitNumbersDirty=true;
 
   if(isEmpty()) {
     _entryPoint=buildBlock(code, code.length(), 0);
@@ -1260,6 +1261,7 @@ void CodeTree::incorporate(CodeStack& code)
           goto matching_done;
         }
 
+        /*
         if (treeOp->isCheckFun()) {
           checkFunOps++;
           //if there were too many CHECK_FUN alternative operations, put them
@@ -1289,6 +1291,7 @@ void CodeTree::incorporate(CodeStack& code)
             continue;
           }
         }
+        */
       } // for(;;)
 
       if (treeOp->isLitEnd()) {
@@ -1433,14 +1436,23 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
     ASS_LE(firstOp, op);
     ASS_G(firstOp+firstOpToCodeBlock(firstOp)->length(), op);
 
-    while(op>firstOp && !op->alternative() && (!op->isLitEnd() || !op->getILS()->nrChildren)) { ASS(!op->isSuccess()); op--; }
+    while(op>firstOp && !op->alternative() && (!op->isLitEnd() || !op->getILS()->nrChildren)) { 
+      ASS(!op->isSuccess()); 
+      if (op->isLitEnd()) {
+        delete op->getILS();
+        op->makeFail();
+      }
+      op--; 
+    }
 
     ASS(!op->isSuccess());
 
     if(op!=firstOp) {
       ASS(op->alternative() || op->isLitEnd());
       //we only change the instruction, the alternative must remain unchanged
-      op->makeFail();
+      if (!op->isLitEnd()) {
+        op->makeFail();
+      }
       return;
     }
     CodeOp* alt=firstOp->alternative();

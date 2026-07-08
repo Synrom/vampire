@@ -118,6 +118,9 @@ public:
     unsigned depth;
     ILStruct* previous = nullptr;
 
+    /** Position of this indexed literal in matcher traversal order. */
+    unsigned splitNumber = 0;
+
     unsigned varCnt;
 
     unsigned* globalVarNumbers;
@@ -197,6 +200,7 @@ public:
     inline bool isSearchStruct() const { return _instruction()==SEARCH_STRUCT; }
     inline bool isCheckFun() const { return _instruction()==CHECK_FUN; }
     inline bool isCheckGroundTerm() const { return _instruction()==CHECK_GROUND_TERM; }
+    inline bool hasSuccessor() const { return _instruction() == SUCCESS_OR_FAIL || (isLitEnd() && getILS()->hasSuccessor); }
 
     inline Term* getTargetTerm() const
     {
@@ -503,6 +507,9 @@ public:
 
   bool _clauseCodeTree;
   unsigned _curTimeStamp = 0;
+
+  /** true if ILStruct::splitNumber values may be outdated */
+  bool _splitNumbersDirty = true;
 
   /** maximal number of local variables in a stored term/literal (always at least 1) */
   unsigned _maxVarCnt = 1;
