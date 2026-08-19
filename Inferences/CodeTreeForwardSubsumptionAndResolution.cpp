@@ -60,7 +60,6 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
 
   std::vector<std::pair<Clause*, int>> clauseMatcherResults;
   premise = cm.next(resolvedQueryLit);
-  std::cout << "Original got result " << premise << std::endl;
   /*
   while ((premise = cm.next(resolvedQueryLit))) {
     clauseMatcherResults.emplace_back(premise, resolvedQueryLit);

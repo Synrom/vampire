@@ -306,7 +306,7 @@ private:
       unsigned actualSharedPrefix(unsigned sharedPrefix);
     };
 
-    const unsigned NextOpThreshold = 5;
+    const unsigned NextOpThreshold = 1000;
     static const unsigned CheckFunOpThreshold=5; //must be greater than 1 or it would cause loops
     static const unsigned CheckGroundTermOpThreshold=3; //must be greater than 1 or it would cause loops
 
