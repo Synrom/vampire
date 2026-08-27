@@ -146,7 +146,7 @@ void CodeTree::MatchInfo::init(ILStruct* ils, unsigned liIndex_, DArray<TermList
 
 
 CodeTree::ILStruct::ILStruct(const Literal* lit, unsigned varCnt, Stack<unsigned>& gvnStack)
-: depth(0), previous(0), splitNumber(0), varCnt(varCnt), globalVarNumbers(0),
+: depth(0), previous(0), varCnt(varCnt), globalVarNumbers(0),
   sortedGlobalVarNumbers(0), globalVarPermutation(0), timestamp(0),
   matchCnt(0), visited(false), finished(false), noNonOppositeMatches(false)
 {
@@ -164,9 +164,8 @@ CodeTree::ILStruct::ILStruct(const Literal* lit, unsigned varCnt, Stack<unsigned
 }
 
 CodeTree::ILStruct::ILStruct(const ILStruct& o)
-: depth(o.depth), previous(o.previous), splitNumber(o.splitNumber), varCnt(o.varCnt), globalVarNumbers(0),
+: depth(o.depth), previous(o.previous), varCnt(o.varCnt), globalVarNumbers(0),
   sortedGlobalVarNumbers(0), hasSuccessor(o.hasSuccessor),
-  hasMergedAlt(o.hasMergedAlt),
   globalVarPermutation(0), timestamp(o.timestamp), matchCnt(o.matchCnt),
   visited(o.visited), finished(o.finished),
   noNonOppositeMatches(o.noNonOppositeMatches)
@@ -463,7 +462,7 @@ void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litSt
       }
       break;
     case CodeTree::LIT_END:
-      out << GREEN << "lit end" << CRESET << " depth=" << op.getILS()->depth << " hasSuccessor=" << op.getILS()->hasSuccessor << " nrChildren=" << op.getILS()->nrChildren << " splitNumber=" << op.getILS()->splitNumber;
+      out << GREEN << "lit end" << CRESET << " depth=" << op.getILS()->depth << " hasSuccessor=" << op.getILS()->hasSuccessor << " nrChildren=" << op.getILS()->nrChildren;
       break;
     case CodeTree::CHECK_GROUND_TERM:
       out << YELLOW << "ground " << CRESET << *op.getTargetTerm();
@@ -1398,7 +1397,6 @@ void CodeTree::incorporate(CodeStack& code)
           goto matching_done;
         }
 
-        /*
         if (treeOp->isCheckFun()) {
           checkFunOps++;
           //if there were too many CHECK_FUN alternative operations, put them
@@ -1428,7 +1426,6 @@ void CodeTree::incorporate(CodeStack& code)
             continue;
           }
         }
-        */
       } // for(;;)
 
       if (treeOp->isLitEnd()) {
@@ -1675,7 +1672,7 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
 
     CodeOp* prevAfterLastOp=prevFirstOp+pcb->length();
     CodeOp* prevOp=prevFirstOp;
-    while(prevOp->alternative()!=firstOp && prevOp < prevAfterLastOp) {
+    while(prevOp < prevAfterLastOp && prevOp->alternative()!=firstOp) {
       prevOp++;
     }
 

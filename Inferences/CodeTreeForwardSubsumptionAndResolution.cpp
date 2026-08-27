@@ -30,70 +30,70 @@ CodeTreeForwardSubsumptionAndResolution<higherOrder>::CodeTreeForwardSubsumption
 template<bool higherOrder>
 bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, Clause *&replacement, ClauseIterator &premises)
 {
-  ASS_EQ(_ct->isEmpty(), _optimizedCt->isEmpty());
-  if (_ct->isEmpty()) {
+  ASS_EQ(_optimizedCt->isEmpty(), _ct->isEmpty());
+  if (_optimizedCt->isEmpty()) {
     return false;
   }
 
-  static typename ClauseCodeTree<higherOrder>::ClauseMatcher oldCm;
+  //static typename ClauseCodeTree<higherOrder>::ClauseMatcher oldCm;
   static typename OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher optimizedCm;
 
-  oldCm.init(_ct, cl, _subsumptionResolution);
+  //oldCm.init(_ct, cl, _subsumptionResolution);
   optimizedCm.init(_optimizedCt, cl, _subsumptionResolution);
 
   Clause* premise = 0;
   int resolvedQueryLit = -1;
 
-  static Stack<Clause*> oldResults;
-  static Stack<Clause*> optimizedResults;
+  std::cout << "Run on " << cl->toReproducerString() << std::endl;
+  premise = optimizedCm.next(resolvedQueryLit);
+  optimizedCm.reset();
+
+
+  /*
+  static Stack<std::pair<Clause*, int>> oldResults;
+  static Stack<std::pair<Clause*, int>> optimizedResults;
   oldResults.reset();
   optimizedResults.reset();
 
-  //std::cout << "Run on " << cl->toReproducerString() << std::endl;
-
-  premise = oldCm.next(resolvedQueryLit);
-  premise = optimizedCm.next(resolvedQueryLit);
-
-  /*
-  if (optimizedCm.countCheckCandidate > oldCm.countCheckCandidate) {
-    std::cout << "Optimized check Candidate count " << optimizedCm.countCheckCandidate << std::endl;
-    std::cout << "Normal check Candidate count " << oldCm.countCheckCandidate << std::endl;
-    //ASS(optimizedCm.countCheckCandidate <= oldCm.countCheckCandidate);
-  }
-  */
-  //ASS(optimizedCm.countCanEnterLiteral == oldCm.countCanEnterLiteral);
-
-  /*
   {
     Clause* c;
     int rql;
     while ((c = oldCm.next(rql))) {
-      if (!premise) {
-        premise = c;
-        resolvedQueryLit = rql;
-      }
-      oldResults.push(c);
+      oldResults.push(std::make_pair(c, rql));
     }
     while ((c = optimizedCm.next(rql))) {
-      optimizedResults.push(c);
+      optimizedResults.push(std::make_pair(c, rql));
     }
   }
-  for (Clause* c : oldResults) {
+  for (std::pair<Clause*, int> c : oldResults) {
     bool found = false;
-    for (Clause* opt : optimizedResults) {
-      if (opt == c) {
+    for (std::pair<Clause*,int> opt : optimizedResults) {
+      if (opt.first == c.first && opt.second == c.second) {
         found = true;
         break;
       }
     }
-    ASS_REP(found, c->toString());
+    ASS_REP(found, cl->toReproducerString());
   }
-  */
+
+  for (std::pair<Clause*, int> opt : optimizedResults) {
+    if (opt.second == -1) {
+      ASS_REP(satSubs.checkSubsumption(opt.first, cl), cl->toReproducerString());
+    } else {
+      ASS_REP(satSubs.checkSubsumptionResolutionWithLiteral(opt.first, cl, opt.second), cl->toReproducerString());
+    }
+  }
 
   oldCm.reset();
   optimizedCm.reset();
+  
+  if (optimizedResults.isNonEmpty()) {
+    premise = optimizedResults.top().first;
+    resolvedQueryLit = optimizedResults.top().second;
+  }
+  */
 
-  if (!premise) {
+  if (premise == nullptr) {
     return false;
   }
 

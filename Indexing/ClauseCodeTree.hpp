@@ -111,8 +111,6 @@ public:
     bool matched() { return lms.isNonEmpty() && lms.top()->success(); }
     CodeOp* getSuccessOp() { ASS(matched()); return lms.top()->op; }
 
-    unsigned countCanEnterLiteral=0;
-    unsigned countCheckCandidate=0;
     USE_ALLOCATOR(ClauseMatcher);
 
   private:
@@ -180,10 +178,8 @@ public:
   void insert(Clause* cl);
   void remove(Clause* cl);
   void incorporate(CodeTree::CodeStack& code, ILStruct** matchedIls);
-  bool canMergeLiterals(CodeStack& code, unsigned startA, unsigned startB);
 
 protected:
-  void checkILStructEnumeration();
 
   /** Context for finding matches of literals. */
   struct OptimizedLiteralMatcher
@@ -229,8 +225,6 @@ public:
     bool matched() { return lms.isNonEmpty() && lms.top()->success(); }
     CodeOp* getSuccessOp() { ASS(matched()); return lms.top()->op; }
 
-    unsigned countCanEnterLiteral=0;
-    unsigned countCheckCandidate=0;
     USE_ALLOCATOR(OptimizedClauseMatcher);
 
   private:
