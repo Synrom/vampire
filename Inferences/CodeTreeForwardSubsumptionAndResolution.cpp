@@ -12,6 +12,8 @@
  * Implements class CodeTreeForwardSubsumptionAndResolution.
  */
 
+#include "Lib/Random.hpp"
+
 #include "Saturation/SaturationAlgorithm.hpp"
 
 #include "ProofExtra.hpp"
@@ -35,88 +37,49 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
     return false;
   }
 
-  //static typename ClauseCodeTree<higherOrder>::ClauseMatcher oldCm;
+  // under randomized simplifications, each subsumption resolution match is with this
+  // probability dropped, giving the next match (possibly a proper subsumption, which
+  // is never leaky) a chance instead (to be tuned)
+  constexpr double RSI_SKIP_PROB = 0.02;
+  bool rsi = env.options->randomizedSimplifications();
+
   static typename OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher optimizedCm;
 
-  //oldCm.init(_ct, cl, _subsumptionResolution);
   optimizedCm.init(_optimizedCt, cl, _subsumptionResolution);
 
-  Clause* premise = 0;
-  int resolvedQueryLit = -1;
+  Clause* premise;
+  int resolvedQueryLit;
 
-  std::cout << "Run on " << cl->toReproducerString() << std::endl;
-  premise = optimizedCm.next(resolvedQueryLit);
-  optimizedCm.reset();
-
-
-  /*
-  static Stack<std::pair<Clause*, int>> oldResults;
-  static Stack<std::pair<Clause*, int>> optimizedResults;
-  oldResults.reset();
-  optimizedResults.reset();
-
-  {
-    Clause* c;
-    int rql;
-    while ((c = oldCm.next(rql))) {
-      oldResults.push(std::make_pair(c, rql));
+  while ((premise = optimizedCm.next(resolvedQueryLit))) {
+    if (resolvedQueryLit == -1) {
+      ASS(satSubs.checkSubsumption(premise, cl));
+      premises = pvi(getSingletonIterator(premise));
+      env.statistics->forwardSubsumed++;
+      optimizedCm.reset();
+      return true;
     }
-    while ((c = optimizedCm.next(rql))) {
-      optimizedResults.push(std::make_pair(c, rql));
+    if (rsi && Random::getDouble(0.0,1.0) < RSI_SKIP_PROB) {
+      continue; // drop this candidate; the next match gets a chance
     }
-  }
-  for (std::pair<Clause*, int> c : oldResults) {
-    bool found = false;
-    for (std::pair<Clause*,int> opt : optimizedResults) {
-      if (opt.first == c.first && opt.second == c.second) {
-        found = true;
-        break;
+    ASS(satSubs.checkSubsumptionResolutionWithLiteral(premise, cl, resolvedQueryLit));
+
+    LiteralStack res;
+    for (unsigned i = 0; i < cl->length(); i++) {
+      if (i == (unsigned)resolvedQueryLit) {
+        continue;
       }
+      res.push((*cl)[i]);
     }
-    ASS_REP(found, cl->toReproducerString());
-  }
-
-  for (std::pair<Clause*, int> opt : optimizedResults) {
-    if (opt.second == -1) {
-      ASS_REP(satSubs.checkSubsumption(opt.first, cl), cl->toReproducerString());
-    } else {
-      ASS_REP(satSubs.checkSubsumptionResolutionWithLiteral(opt.first, cl, opt.second), cl->toReproducerString());
-    }
-  }
-
-  oldCm.reset();
-  optimizedCm.reset();
-  
-  if (optimizedResults.isNonEmpty()) {
-    premise = optimizedResults.top().first;
-    resolvedQueryLit = optimizedResults.top().second;
-  }
-  */
-
-  if (premise == nullptr) {
-    return false;
-  }
-
-  if (resolvedQueryLit == -1) {
-    ASS(satSubs.checkSubsumption(premise, cl));
+    replacement = Clause::fromStack(res, SimplifyingInference2(InferenceRule::FORWARD_SUBSUMPTION_RESOLUTION, cl, premise));
+    if(env.options->proofExtra() == Options::ProofExtra::FULL)
+      env.proofExtra.insert(replacement, new LiteralInferenceExtra((*cl)[resolvedQueryLit]));
     premises = pvi(getSingletonIterator(premise));
-    env.statistics->forwardSubsumed++;
+    optimizedCm.reset();
     return true;
   }
-  ASS(satSubs.checkSubsumptionResolutionWithLiteral(premise, cl, resolvedQueryLit));
 
-  LiteralStack res;
-  for (unsigned i = 0; i < cl->length(); i++) {
-    if (i == (unsigned)resolvedQueryLit) {
-      continue;
-    }
-    res.push((*cl)[i]);
-  }
-  replacement = Clause::fromStack(res, SimplifyingInference2(InferenceRule::FORWARD_SUBSUMPTION_RESOLUTION, cl, premise));
-  if(env.options->proofExtra() == Options::ProofExtra::FULL)
-    env.proofExtra.insert(replacement, new LiteralInferenceExtra((*cl)[resolvedQueryLit]));
-  premises = pvi(getSingletonIterator(premise));
-  return true;
+  optimizedCm.reset();
+  return false;
 }
 
 template class CodeTreeForwardSubsumptionAndResolution<false>;
