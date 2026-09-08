@@ -19,20 +19,20 @@
 #include "ProofExtra.hpp"
 #include "CodeTreeForwardSubsumptionAndResolution.hpp"
 
+extern bool DEBUG_TRACE_OCT;
+
 namespace Inferences {
 
 template<bool higherOrder>
 CodeTreeForwardSubsumptionAndResolution<higherOrder>::CodeTreeForwardSubsumptionAndResolution(SaturationAlgorithm& salg)
   : _subsumptionResolution(salg.getOptions().forwardSubsumptionResolution()),
     _index(salg.getSimplifyingIndex<CodeTreeSubsumptionIndex<higherOrder>>()),
-    _ct(_index->getClauseCodeTree()),
     _optimizedCt(_index->getOptimizedClauseCodeTree())
 {}
 
 template<bool higherOrder>
 bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, Clause *&replacement, ClauseIterator &premises)
 {
-  ASS_EQ(_optimizedCt->isEmpty(), _ct->isEmpty());
   if (_optimizedCt->isEmpty()) {
     return false;
   }
@@ -40,8 +40,8 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
   // under randomized simplifications, each subsumption resolution match is with this
   // probability dropped, giving the next match (possibly a proper subsumption, which
   // is never leaky) a chance instead (to be tuned)
-  constexpr double RSI_SKIP_PROB = 0.02;
-  bool rsi = env.options->randomizedSimplifications();
+  //constexpr double RSI_SKIP_PROB = 0.02;
+  //bool rsi = env.options->randomizedSimplifications();
 
   static typename OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher optimizedCm;
 
@@ -49,19 +49,48 @@ bool CodeTreeForwardSubsumptionAndResolution<higherOrder>::perform(Clause *cl, C
 
   Clause* premise;
   int resolvedQueryLit;
+  //std::cout << "Run on " << cl->toReproducerString() << std::endl;
 
   while ((premise = optimizedCm.next(resolvedQueryLit))) {
+    // DIAGNOSTIC: cross-check against the (unoptimized) base ClauseMatcher,
+    // which shares the exact same indexed clause set (_ct is maintained in
+    // lockstep with _optimizedCt). If the optimized matcher returns a
+    // (premise, resolvedQueryLit) pair the base matcher never returns, the
+    // bug is in OptimizedClauseMatcher specifically.
+    /*
+    {
+      typename ClauseCodeTree<higherOrder>::ClauseMatcher baseCm;
+      baseCm.init(_ct, cl, _subsumptionResolution);
+      int baseResolvedLit;
+      Clause* basePremise;
+      bool baseFound = false;
+      while ((basePremise = baseCm.next(baseResolvedLit))) {
+        if (basePremise == premise && baseResolvedLit == resolvedQueryLit) {
+          baseFound = true;
+          break;
+        }
+      }
+      baseCm.reset();
+      if (!baseFound) {
+        std::cout << "MISMATCH (initCounter=" << initCounter << "): optimized matcher returned (" << premise->toReproducerString()
+                   << ", " << resolvedQueryLit << ") for cl=" << cl->toReproducerString()
+                   << " but the base matcher never returns this pair" << std::endl;
+        ASSERTION_VIOLATION;
+      }
+    }
+    */
     if (resolvedQueryLit == -1) {
-      ASS(satSubs.checkSubsumption(premise, cl));
+      ASS(premise != nullptr);
+      ASS_REP(satSubs.checkSubsumption(premise, cl), premise->toReproducerString() + " ||| " + cl->toReproducerString());
       premises = pvi(getSingletonIterator(premise));
       env.statistics->forwardSubsumed++;
       optimizedCm.reset();
       return true;
     }
-    if (rsi && Random::getDouble(0.0,1.0) < RSI_SKIP_PROB) {
-      continue; // drop this candidate; the next match gets a chance
-    }
-    ASS(satSubs.checkSubsumptionResolutionWithLiteral(premise, cl, resolvedQueryLit));
+    //if (rsi && Random::getDouble(0.0,1.0) < RSI_SKIP_PROB) {
+    //  continue; // drop this candidate; the next match gets a chance
+    //}
+    ASS_REP(satSubs.checkSubsumptionResolutionWithLiteral(premise, cl, resolvedQueryLit), cl->toReproducerString());
 
     LiteralStack res;
     for (unsigned i = 0; i < cl->length(); i++) {

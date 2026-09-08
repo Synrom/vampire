@@ -124,12 +124,12 @@ void CodeTreeSubsumptionIndex<higherOrder>::handleClause(Clause* cl, bool adding
 
   if(adding) {
     //std::cout << "wtree.insert(clause({" << cl->toReproducerString() << "}));" << std::endl;
-    _ct.insert(cl);
+    //_ct.insert(cl);
     _optimizedCt.insert(cl);
   }
   else {
     //std::cout << "wtree.remove(clause({" << cl->toReproducerString() << "}));" << std::endl;
-    _ct.remove(cl);
+    //_ct.remove(cl);
     _optimizedCt.remove(cl);
   }
 }

@@ -174,6 +174,7 @@ public:
   OptimizedClauseCodeTree() : Base() {}
 
   using Base::incorporate;
+  using Base::getEntryPoint;
 
   void insert(Clause* cl);
   void remove(Clause* cl);
@@ -193,7 +194,8 @@ protected:
     using Base::finished;
     using Base::execute;
 
-    void init(OptimizedClauseCodeTree* tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, unsigned depth_, unsigned lmsIndex_, bool seekOnlySuccess=false);
+    void init(OptimizedClauseCodeTree* tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, unsigned depth_,
+	    unsigned lmsIndex_, Stack<CodeOp*>* futureCache_, CodeOp* prevLitEnd_, bool seekOnlySuccess=false);
     bool next();
     bool doEagerMatching();
 
@@ -208,9 +210,22 @@ protected:
     unsigned depth;
     unsigned lmsIndex;
 
+    /** Cache of LIT_END ops of higher depth encountered while matching this
+     * (or an ancestor) literal, shared with all literal matchers of the
+     * enclosing OptimizedClauseMatcher. A literal matcher entered right after
+     * a LIT_END op picks its own matches out of this cache -- those whose
+     * ILStruct::previous is the ILStruct of that LIT_END op -- before trying
+     * any actual code. */
+    Stack<CodeOp*>* futureCache;
+    /** The LIT_END op executed by the previous literal matcher that led us
+     * here, or nullptr for the very first literal. Used to find this
+     * literal's own entries in @b futureCache. */
+    CodeOp* prevLitEnd;
+
     Stack<CodeOp*> eagerResults;
 
     void recordMatch();
+    CodeOp* pickFutureCacheEntry();
   };
 
 public:
@@ -228,7 +243,7 @@ public:
     USE_ALLOCATOR(OptimizedClauseMatcher);
 
   private:
-    void enterLiteral(CodeOp* entry, unsigned depth, bool seekOnlySuccess);
+    void enterLiteral(CodeOp* entry, unsigned depth, bool seekOnlySuccess, CodeOp* prevLitEnd);
     void leaveLiteral();
     bool canEnterLiteral(CodeOp* op);
 
@@ -241,6 +256,11 @@ public:
     Clause* query;
     OptimizedClauseCodeTree* tree;
     bool sres;
+
+    /** Cache of LIT_END ops of higher depth than the literal matcher that
+     * encountered them, shared by all literal matchers of this clause
+     * matcher. See @b OptimizedLiteralMatcher. */
+    Stack<CodeOp*> futureCache;
 
     static const unsigned sresNoLiteral=static_cast<unsigned>(-1);
     unsigned sresLiteral;
@@ -269,22 +289,6 @@ protected:
 
   void optimizeLiteralOrder(DArray<Literal*>& lits);
   size_t evalSharingBetweenLiterals(Literal* lit1, Literal* lit2);
-
-  struct OptimizedRemovingLiteralMatcher
-  : public CodeTree::Matcher</*removing*/true,false,higherOrder>
-  {
-    using MatcherBase = CodeTree::Matcher</*removing*/true,false,higherOrder>;
-    using MatcherBase::entry;
-
-    void init(CodeTree::CodeOp* entry_, CodeTree::CodeOp* lastEntry, CodeTree::LitInfo* linfos_, size_t linfoCnt_,
-      OptimizedClauseCodeTree* tree_, Stack<CodeTree::CodeOp*>* firstsInBlocks_);
-    bool execute();
-
-    USE_ALLOCATOR(OptimizedRemovingLiteralMatcher);
-
-  private:
-    CodeTree::CodeOp* secondEntry;
-  };
 };
 
 

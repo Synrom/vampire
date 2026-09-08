@@ -493,7 +493,6 @@ size_t OptimizedClauseCodeTree<higherOrder>::evalSharingBetweenLiterals(Literal*
 template<bool higherOrder>
 void OptimizedClauseCodeTree<higherOrder>::insert(Clause* cl)
 {
-  std::cout << "wtree.insert(clause({" << cl->toReproducerString() << "}));" << std::endl;
   unsigned clen=cl->length();
   static DArray<Literal*> lits;
   lits.initFromArray(clen, *cl);
@@ -569,108 +568,35 @@ void OptimizedClauseCodeTree<higherOrder>::insert(Clause* cl)
 template<bool higherOrder>
 void OptimizedClauseCodeTree<higherOrder>::remove(Clause* cl)
 {
-  std::cout << "wtree.remove(clause({" << cl->toReproducerString() << "}));" << std::endl;
-  static DArray<CodeTree::LitInfo> lInfos;
-  Recycled<Stack<CodeTree::CodeOp*>> firstsInBlocks;
-  Recycled<Stack<Recycled<OptimizedRemovingLiteralMatcher, NoReset>>> rlms;
+  Stack<CodeOp*> queue; 
+  queue.push(getEntryPoint());
 
-  unsigned clen=cl->length();
-  lInfos.ensure(clen);
-
-  if(!clen) {
-    CodeTree::CodeOp* op=this->getEntryPoint();
-    firstsInBlocks->push(op);
-    if(!this->removeOneOfAlternatives(op, cl, &*firstsInBlocks)) {
-      ASSERTION_VIOLATION;
-      INVALID_OPERATION("empty clause to be removed was not found");
-    }
-    return;
-  }
-
-  for(unsigned i=0;i<clen;i++) {
-    lInfos[i]=CodeTree::LitInfo(cl,i);
-    lInfos[i].liIndex=i;
-  }
-  this->incTimeStamp();
-
-  CodeTree::CodeOp* op=this->getEntryPoint();
-  firstsInBlocks->push(op);
-  unsigned depth=0;
-  for(;;) {
-    OptimizedRemovingLiteralMatcher* rlm = 0;
-    {
-      Recycled<OptimizedRemovingLiteralMatcher, NoReset> rrlm; // take rlm out of recycling
-      rlm = &*rrlm; // get the actual content (also to use after this initialization block)
-      CodeTree::CodeOp* lastEntry = rlms->size() > 0 ? rlms->top()->entry : nullptr;
-      rlm->init(op, lastEntry, lInfos.array(), lInfos.size(), this, &*firstsInBlocks); // init it
-      rlms->push(std::move(rrlm)); // store it in rlms (along with the obligation to return to recycling when no longer used)
-    }
-
-  iteration_restart:
-    if(!rlm->execute()) {
-      if(depth==0) {
-        ASSERTION_VIOLATION;
-        INVALID_OPERATION("clause to be removed was not found");
+  bool removed = false;
+  while (queue.isNonEmpty()) {
+    CodeOp* bOp = queue.pop();
+    if (bOp->isSearchStruct()) {
+      auto ss = bOp->getSearchStruct();
+      for (unsigned i=0; i < ss->length(); i++) {
+        if (ss->targets[i]) {
+          queue.push(ss->targets[i]);
+        }
       }
-      rlms->pop();
-      depth--;
-      rlm = &*rlms->top();
-      goto iteration_restart;
-    }
-
-    op=rlm->op;
-    ASS(op->isLitEnd());
-    ASS(op->getILS()->depth <= depth);
-
-    if (op->getILS()->depth < depth) {
-      goto iteration_restart;
-    }
-
-    if(op->getILS()->timestamp==this->_curTimeStamp) {
-      //we have already been here
-      goto iteration_restart;
-    }
-    op->getILS()->timestamp=this->_curTimeStamp;
-
-    op++;
-    if(depth==clen-1) {
-      if(this->removeOneOfAlternatives(op, cl, &*firstsInBlocks)) {
-        //successfully removed
-        break;
+    } else {
+      CodeBlock* block = CodeTree::firstOpToCodeBlock(bOp);
+      for (unsigned i=0; i < block->length(); i++) {
+        CodeOp* op = &(*block)[i];
+        if (op->alternative()) {
+          queue.push(op->alternative());
+        }
+        if (op->isSuccess() && op->getSuccessResult<Clause>() == cl) {
+          op->makeFail();
+          queue.reset();
+          removed = true;
+        }
       }
-      goto iteration_restart;
     }
-    ASS_L(depth,clen-1);
-    depth++;
   }
-
-  for(unsigned i=0;i<clen;i++) {
-    lInfos[i].dispose();
-  }
-}
-template<bool higherOrder>
-bool OptimizedClauseCodeTree<higherOrder>::OptimizedRemovingLiteralMatcher::execute()
-{
-  if (MatcherBase::execute()) {
-    return true;
-  } else if (secondEntry && entry != secondEntry) {
-    MatcherBase::curLInfo = 0;
-    entry = secondEntry;
-    MatcherBase::prepareLiteral();
-    return MatcherBase::execute();
-  }
-  return false;
-}
-
-template<bool higherOrder>
-void OptimizedClauseCodeTree<higherOrder>::OptimizedRemovingLiteralMatcher::init(
-    CodeTree::CodeOp* entry_, CodeTree::CodeOp* lastEntry, CodeTree::LitInfo* linfos_, size_t linfoCnt_,
-    OptimizedClauseCodeTree* tree_, Stack<CodeTree::CodeOp*>* firstsInBlocks_)
-{
-  MatcherBase::init(tree_, entry_, linfos_, linfoCnt_, firstsInBlocks_);
-  secondEntry = lastEntry;
-
-  ALWAYS(MatcherBase::prepareLiteral());
+  ASS(removed);
 }
 
 template<bool higherOrder>
@@ -995,14 +921,17 @@ void ClauseCodeTree<higherOrder>::LiteralMatcher::recordMatch()
  */
 template<bool higherOrder>
 void OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::init(OptimizedClauseCodeTree* tree_, CodeOp* entry_,
-					  LitInfo* linfos_, size_t linfoCnt_, unsigned depth_, unsigned lmsIndex_, bool seekOnlySuccess)
+					  LitInfo* linfos_, size_t linfoCnt_, unsigned depth_, unsigned lmsIndex_,
+					  Stack<CodeOp*>* futureCache_, CodeOp* prevLitEnd_, bool seekOnlySuccess)
 {
   ASS_G(linfoCnt_,0);
 
-  Base::init(tree_,entry_,linfos_,linfoCnt_);
+  Base::init(*tree_,entry_,linfos_,linfoCnt_);
 
   depth = depth_;
   lmsIndex = lmsIndex_;
+  futureCache = futureCache_;
+  prevLitEnd = prevLitEnd_;
   _eagerlyMatched=false;
   eagerResults.reset();
 
@@ -1028,6 +957,26 @@ void OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::init(Optimiz
 }
 
 /**
+ * Remove and return an entry from @b futureCache that was queued for this
+ * literal matcher (i.e. one whose ILStruct::previous is the ILStruct of the
+ * LIT_END op that led us here), or nullptr if there is none.
+ */
+template<bool higherOrder>
+typename OptimizedClauseCodeTree<higherOrder>::CodeOp*
+OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::pickFutureCacheEntry()
+{
+  if(!prevLitEnd) {
+    return nullptr;
+  }
+  for(size_t i=futureCache->size(); i-- > 0;) {
+    if((*futureCache)[i]->getILS()->previous == prevLitEnd->getILS()) {
+      return futureCache->swapRemove(i);
+    }
+  }
+  return nullptr;
+}
+
+/**
  * Try to find a match, and if one is found, return true
  */
 template<bool higherOrder>
@@ -1042,11 +991,25 @@ bool OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::next()
     return true;
   }
 
+  if(CodeOp* cached = pickFutureCacheEntry()) {
+    op=cached;
+    _matched=true;
+    return true;
+  }
+
+  if(!Base::entry) {
+    //nothing left to try: this literal has no code of its own (its
+    //LIT_END has no successor), so all its matches (if any) can only
+    //come from futureCache, which we just found to be exhausted
+    return false;
+  }
+
   if(finished()) {
     //all possible matches are exhausted
     return false;
   }
 
+  op = Base::entry;
   while ((_matched = execute())) {
     ASS(op->isLitEnd() || op->isSuccess());
     if(op->isLitEnd()) {
@@ -1054,7 +1017,7 @@ bool OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::next()
       if (op->getILS()->depth == depth) {
         return true;
       } else {
-        eagerResults.push(op);
+        futureCache->push(op);
       }
     } else {
       return true;
@@ -1071,69 +1034,46 @@ template<bool higherOrder>
 bool OptimizedClauseCodeTree<higherOrder>::OptimizedLiteralMatcher::doEagerMatching()
 {
   ASS(!eagerlyMatched()); //eager matching can be done only once
-  ASS(!finished());
 
   //backup the current op
   CodeOp* currOp=op;
 
-  static Stack<CodeOp*> eagerResultsRevOrder;
-  static Stack<CodeOp*> eagerFutureResultsRevOrder;
+  //we want to yield results in the order we found them (otherwise the
+  //subsumption resolution would be preferred to the subsumption), so we
+  //collect them here in reverse order and transfer them onto eagerResults
+  //(a stack) at the end, so that popping eagerResults yields them in the
+  //order they were found
+  static Stack<CodeOp*> ownResultsRevOrder;
   static Stack<CodeOp*> successes;
-  eagerResultsRevOrder.reset();
-  eagerFutureResultsRevOrder.reset();
+  ownResultsRevOrder.reset();
   successes.reset();
 
-  while(execute()) {
-    if(op->isLitEnd()) {
-      recordMatch();
-      if (op->getILS()->depth != depth) {
-        eagerFutureResultsRevOrder.push(op);
-      } else {
-        eagerResultsRevOrder.push(op);
-      }
-    }
-    else {
-      ASS(op->isSuccess());
-      successes.push(op);
-    }
+  //matches for this literal that were already queued for us by an ancestor
+  //literal matcher
+  while(CodeOp* cached = pickFutureCacheEntry()) {
+    ownResultsRevOrder.push(cached);
   }
 
-  //we want to yield results in the order we found them
-  //(otherwise the subsumption resolution would be preferred to the
-  //subsumption)
-  if (eagerFutureResultsRevOrder.isNonEmpty()) {
-    for (unsigned i=eagerFutureResultsRevOrder.size()-1; ;i--) {
-      eagerFutureResultsRevOrder[i]->getILS()->previous->ensureFreshness(Base::tree->_curTimeStamp);
-      if (!eagerFutureResultsRevOrder[i]->getILS()->previous->matchCnt) {
-        eagerFutureResultsRevOrder.swapRemove(i);
-      } 
-      if (i==0) break;
-    }
-  }
-
-  while (eagerResults.isNonEmpty()) {
-    CodeOp* result = eagerResults.pop();
-    result->getILS()->previous->ensureFreshness(Base::tree->_curTimeStamp);
-    if (result->getILS()->previous->matchCnt) {
-      eagerFutureResultsRevOrder.push(result);
-    }
-  }
-
-  while(eagerResultsRevOrder.isNonEmpty()) {
-    if (eagerFutureResultsRevOrder.isNonEmpty()) {
-      ILStruct* ils = eagerResultsRevOrder.top()->getILS();
-      for (unsigned i=eagerFutureResultsRevOrder.size()-1; ;i--) {
-        if (eagerFutureResultsRevOrder[i]->getILS()->previous == ils) {
-          eagerResults.push(eagerFutureResultsRevOrder.swapRemove(i));
+  if(Base::entry) {
+    op = Base::entry;
+    while(execute()) {
+      if(op->isLitEnd()) {
+        recordMatch();
+        if (op->getILS()->depth == depth) {
+          ownResultsRevOrder.push(op);
+        } else {
+          futureCache->push(op);
         }
-        if (i==0) break;
+      }
+      else {
+        ASS(op->isSuccess());
+        successes.push(op);
       }
     }
-    eagerResults.push(eagerResultsRevOrder.pop());
   }
 
-  while (eagerFutureResultsRevOrder.isNonEmpty()) {
-    eagerResults.push(eagerFutureResultsRevOrder.pop());
+  while(ownResultsRevOrder.isNonEmpty()) {
+    eagerResults.push(ownResultsRevOrder.pop());
   }
   //we want to yield SUCCESS operations first (as after them there may
   //be no need for further clause retrieval)
@@ -1706,7 +1646,8 @@ void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::init(Optimize
   }
 
   tree->incTimeStamp();
-  enterLiteral(tree->getEntryPoint(), 0, clen==0);
+  futureCache.reset();
+  enterLiteral(tree->getEntryPoint(), 0, clen==0, nullptr);
 }
 
 template<bool higherOrder>
@@ -1717,6 +1658,7 @@ void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::reset()
     lInfos[i].dispose();
   }
   lms.reset();
+  futureCache.reset();
 
 #if VDEBUG
   ASS_EQ(tree->_clauseMatcherCounter,1);
@@ -1761,7 +1703,10 @@ Clause* OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::next(int& 
       ASS_LE(lms.size(), query->length()); //this is due to the seekOnlySuccess part below
 
       bool seekOnlySuccess=lm->getILS()->depth+1==query->length();
-      CodeOp* newLitEntry= lm->op+1;
+      //LIT_END ops without a successor have no code of their own to enter;
+      //the next literal matcher may still pick up its matches from
+      //futureCache, so we still enter it, just without any code to execute.
+      CodeOp* newLitEntry = lm->getILS()->hasSuccessor ? lm->op+1 : nullptr;
 
       //check that we have cleared the sresLiteral value if it is no longer valid
       ASS(!sres || sresLiteral==sresNoLiteral || sresLiteral<lms.size()-1);
@@ -1773,7 +1718,7 @@ Clause* OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::next(int& 
 	}
       }
 
-      enterLiteral(newLitEntry, lm->op->getILS()->depth+1, seekOnlySuccess);
+      enterLiteral(newLitEntry, lm->op->getILS()->depth+1, seekOnlySuccess, lm->op);
     }
   }
 }
@@ -1788,7 +1733,7 @@ inline bool OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::canEnt
   if(ils->timestamp==tree->_curTimeStamp && ils->visited) {
     return false;
   }
-  
+
   if (ils->depth+1 > query->length()) {
     return false;
   }
@@ -1817,7 +1762,7 @@ inline bool OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::canEnt
     }
   }
 
-  return ils->hasSuccessor;
+  return true;
 }
 
 /**
@@ -1829,7 +1774,7 @@ inline bool OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::canEnt
  *   to see just clauses that end at this point).
  */
 template<bool higherOrder>
-void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::enterLiteral(CodeOp* entry, unsigned depth, bool seekOnlySuccess)
+void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::enterLiteral(CodeOp* entry, unsigned depth, bool seekOnlySuccess, CodeOp* prevLitEnd)
 {
   if(!seekOnlySuccess) {
     RSTAT_MCTR_INC("enterLiteral levels (non-sos)", lms.size());
@@ -1856,7 +1801,7 @@ void OptimizedClauseCodeTree<higherOrder>::OptimizedClauseMatcher::enterLiteral(
   }
 
   Recycled<OptimizedLiteralMatcher, NoReset> lm;
-  lm->init(tree, entry, lInfos.array(), linfoCnt, depth, lms.size(), seekOnlySuccess);
+  lm->init(tree, entry, lInfos.array(), linfoCnt, depth, lms.size(), &futureCache, prevLitEnd, seekOnlySuccess);
   lms.push(std::move(lm));
 }
 

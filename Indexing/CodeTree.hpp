@@ -581,6 +581,9 @@ public:
   unsigned _maxVarCnt = 1;
 
   CodeBlock* _entryPoint = nullptr;
+
+  /** All CodeBlocks currently owned by this tree. */
+  Stack<CodeBlock*> _codeBlocks;
 };
 
 }
