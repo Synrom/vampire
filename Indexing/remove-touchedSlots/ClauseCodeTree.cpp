@@ -32,6 +32,10 @@
 
 namespace Indexing
 {
+namespace Ablation
+{
+namespace RemoveTouchedSlots
+{
 
 using namespace std;
 using namespace Lib;
@@ -772,7 +776,7 @@ void ClauseCodeTree::ClauseMatcher::reset()
  */
 Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
 {
-  TIME_TRACE("Clause Matcher next current")
+  TIME_TRACE("Clause Matcher next removeTouchedSlots")
   if(lms.isEmpty()) {
     return 0;
   }
@@ -1176,4 +1180,6 @@ bool ClauseCodeTree::ClauseMatcher::existsCompatibleMatch(ILStruct* si, MatchInf
   return false;
 }
 
+}
+}
 }

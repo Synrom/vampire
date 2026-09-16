@@ -23,7 +23,18 @@
 #include "TermCodeTree.hpp"
 #include "ClauseCodeTree.hpp"
 
+#include "master/ClauseCodeTree.hpp"
+#include "ordering/ClauseCodeTree.hpp"
+#include "simplify-canEnterLiteral-first/ClauseCodeTree.hpp"
+#include "simplify-canEnterLiteral-second/ClauseCodeTree.hpp"
+#include "remove-touchedSlots/ClauseCodeTree.hpp"
+#include "save-bindings-directly/ClauseCodeTree.hpp"
+#include "ilstruct-simplification/ClauseCodeTree.hpp"
+
 #include "Index.hpp"
+
+#include <algorithm>
+#include <vector>
 
 namespace Indexing
 {
@@ -169,25 +180,108 @@ private:
   LiteralCodeTree<Data> _ct;
 };
 
+/**
+ * Ablation-study helper: checks structural invariants of a ClauseCodeTree.
+ * Ported from the InvariantTester in UnitTests/tClauseCodeTrees.cpp; only
+ * the checks the ablation study actually calls are kept here.
+ */
+struct InvariantTester {
+  ClauseCodeTree& tree;
+  explicit InvariantTester(ClauseCodeTree& tree) : tree(tree) {}
+
+  bool checkAllClausesAppear(std::vector<Clause*> expected) {
+    std::vector<Clause*> actual;
+    tree.visitAllOps([&](const CodeTree::CodeOp* op, unsigned, bool) {
+      if (op->isSuccess()) { actual.push_back(op->getSuccessResult<Clause>()); }
+    });
+    std::sort(actual.begin(), actual.end(), std::less<Clause*>{});
+    std::sort(expected.begin(), expected.end(), std::less<Clause*>{});
+    ASS(actual == expected);
+    return true;
+  }
+
+  bool checkNoConsecutiveNextOps() {
+    tree.visitAllOps([](const CodeTree::CodeOp* op, unsigned, bool) {
+      if (op->isNext()) { ASS(!op[1].isNext()); }
+    });
+    return true;
+  }
+
+  bool checkILSDepths() {
+    tree.visitAllOps([](const CodeTree::CodeOp* op, unsigned, bool) {
+      if (op->isLitEnd()) {
+        auto ils = op->getILS();
+        ASS_EQ(ils->depth, ils->previous ? ils->previous->depth + 1 : 0);
+        ASS_EQ(ils->hasContinuations, ils->continuations.isNonEmpty());
+        for (const auto& cont : ils->continuations) {
+          ASS(cont.entry);
+          if (ils->previous) { ASS_L(cont.slot, ils->previous->successorSlotCount); }
+        }
+      }
+    });
+    return true;
+  }
+};
+
 class CodeTreeSubsumptionIndex
 : public Index
 {
 public:
   CodeTreeSubsumptionIndex(SaturationAlgorithm&) {}
   ClauseCodeTree* getClauseCodeTree() { return &_ct; }
+
+  Ablation::Master::ClauseCodeTree* getMasterTree() { return &_ctMaster; }
+  Ablation::Ordering::ClauseCodeTree* getOrderingTree() { return &_ctOrdering; }
+  Ablation::SimplifyCanEnterFirst::ClauseCodeTree* getSimplifyCanEnterFirstTree() { return &_ctSimplifyCanEnterFirst; }
+  Ablation::SimplifyCanEnterSecond::ClauseCodeTree* getSimplifyCanEnterSecondTree() { return &_ctSimplifyCanEnterSecond; }
+  Ablation::RemoveTouchedSlots::ClauseCodeTree* getRemoveTouchedSlotsTree() { return &_ctRemoveTouchedSlots; }
+  Ablation::SaveBindingsDirectly::ClauseCodeTree* getSaveBindingsDirectlyTree() { return &_ctSaveBindingsDirectly; }
+  Ablation::ILStructSimplification::ClauseCodeTree* getILStructSimplificationTree() { return &_ctILStructSimplification; }
+
 protected:
   void handleClause(Clause* c, bool adding) override {
     TIME_TRACE("codetree subsumption index maintenance");
 
     if(adding) {
       _ct.insert(c);
+      _ctMaster.insert(c);
+      _ctOrdering.insert(c);
+      _ctSimplifyCanEnterFirst.insert(c);
+      _ctSimplifyCanEnterSecond.insert(c);
+      _ctRemoveTouchedSlots.insert(c);
+      _ctSaveBindingsDirectly.insert(c);
+      _ctILStructSimplification.insert(c);
+      _trackedClauses.push_back(c);
     }
     else {
       _ct.remove(c);
+      _ctMaster.remove(c);
+      _ctOrdering.remove(c);
+      _ctSimplifyCanEnterFirst.remove(c);
+      _ctSimplifyCanEnterSecond.remove(c);
+      _ctRemoveTouchedSlots.remove(c);
+      _ctSaveBindingsDirectly.remove(c);
+      _ctILStructSimplification.remove(c);
+      auto it = std::find(_trackedClauses.begin(), _trackedClauses.end(), c);
+      ASS(it != _trackedClauses.end());
+      _trackedClauses.erase(it);
     }
+
+    InvariantTester tester(_ct);
+    ASS(tester.checkAllClausesAppear(_trackedClauses));
+    ASS(tester.checkNoConsecutiveNextOps());
+    ASS(tester.checkILSDepths());
   }
 private:
   ClauseCodeTree _ct;
+  Ablation::Master::ClauseCodeTree _ctMaster;
+  Ablation::Ordering::ClauseCodeTree _ctOrdering;
+  Ablation::SimplifyCanEnterFirst::ClauseCodeTree _ctSimplifyCanEnterFirst;
+  Ablation::SimplifyCanEnterSecond::ClauseCodeTree _ctSimplifyCanEnterSecond;
+  Ablation::RemoveTouchedSlots::ClauseCodeTree _ctRemoveTouchedSlots;
+  Ablation::SaveBindingsDirectly::ClauseCodeTree _ctSaveBindingsDirectly;
+  Ablation::ILStructSimplification::ClauseCodeTree _ctILStructSimplification;
+  std::vector<Clause*> _trackedClauses;
 };
 
 };

@@ -26,6 +26,18 @@
 namespace Indexing {
   class CodeTree;
   class ClauseCodeTree;
+  namespace Ablation {
+#define VAMPIRE_ABLATION_VARIANT(Name) \
+    namespace Name { class CodeTree; class ClauseCodeTree; }
+    VAMPIRE_ABLATION_VARIANT(Master)
+    VAMPIRE_ABLATION_VARIANT(Ordering)
+    VAMPIRE_ABLATION_VARIANT(SimplifyCanEnterFirst)
+    VAMPIRE_ABLATION_VARIANT(SimplifyCanEnterSecond)
+    VAMPIRE_ABLATION_VARIANT(RemoveTouchedSlots)
+    VAMPIRE_ABLATION_VARIANT(SaveBindingsDirectly)
+    VAMPIRE_ABLATION_VARIANT(ILStructSimplification)
+#undef VAMPIRE_ABLATION_VARIANT
+  }
 }
 
 namespace Lib {
@@ -118,6 +130,20 @@ public:
 
   friend class Indexing::CodeTree;
   friend class Indexing::ClauseCodeTree;
+  friend class Indexing::Ablation::Master::CodeTree;
+  friend class Indexing::Ablation::Master::ClauseCodeTree;
+  friend class Indexing::Ablation::Ordering::CodeTree;
+  friend class Indexing::Ablation::Ordering::ClauseCodeTree;
+  friend class Indexing::Ablation::SimplifyCanEnterFirst::CodeTree;
+  friend class Indexing::Ablation::SimplifyCanEnterFirst::ClauseCodeTree;
+  friend class Indexing::Ablation::SimplifyCanEnterSecond::CodeTree;
+  friend class Indexing::Ablation::SimplifyCanEnterSecond::ClauseCodeTree;
+  friend class Indexing::Ablation::RemoveTouchedSlots::CodeTree;
+  friend class Indexing::Ablation::RemoveTouchedSlots::ClauseCodeTree;
+  friend class Indexing::Ablation::SaveBindingsDirectly::CodeTree;
+  friend class Indexing::Ablation::SaveBindingsDirectly::ClauseCodeTree;
+  friend class Indexing::Ablation::ILStructSimplification::CodeTree;
+  friend class Indexing::Ablation::ILStructSimplification::ClauseCodeTree;
 
   /**
    * Iterator that deallocates the vector when it yields the last value.

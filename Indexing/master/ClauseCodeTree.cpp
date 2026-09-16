@@ -32,10 +32,19 @@
 
 namespace Indexing
 {
+namespace Ablation {
+namespace Master {
 
 using namespace std;
 using namespace Lib;
 using namespace Kernel;
+
+void ClauseCodeTree::onCodeOpDestroying(CodeOp* op)
+{
+  if (op->isLitEnd()) {
+    delete op->getILS(); 
+  }
+}
 
 void ClauseCodeTree::printSuccess(std::ostream& out, const CodeOp& op) const
 {
@@ -86,288 +95,122 @@ struct ClauseCodeTree::InitialLiteralOrderingComparator
   }
 };
 
-// LIT_END carries clause-wide variable information, not part of an overlap
-unsigned ClauseCodeTree::sharedPrefix(const CodeOp* first, const CodeOp* second)
-{
-  unsigned shared = 0;
-  while (!first[shared].isLitEnd() && !second[shared].isLitEnd() &&
-         first[shared].equalsForOpMatching(second[shared])) {
-    ++shared;
-  }
-  return shared;
-}
-
-ClauseCodeTree::InsertionPosition ClauseCodeTree::matchCode(
-    const CodeOp* code, unsigned length, const Stack<InsertionPosition>& entries,
-    unsigned shared, Stack<InsertionPosition>& nextEntries, bool compress)
-{
-  InsertionPosition best;
-  nextEntries.reset();
-  for (auto entry : entries) {
-    if (entry.matchedPrefixLength > shared) {
-      continue;
-    }
-    Stack<std::pair<unsigned, unsigned>> checkpoints;
-    CodeOp* op = entry.op;
-    unsigned i = entry.matchedPrefixLength;
-    for (; i < length; ++i) {
-      CodeOp* chainStart = op;
-      unsigned funs = 0, grounds = 0;
-      for (;;) {
-        if (op->isNext()) {
-          checkpoints.push({op->_arg(), i});
-          ++op;
-          continue;
-        }
-        if (op->isSearchStruct()) {
-          CodeOp** target;
-          if (op->getSearchStruct()->getTargetOpPtr<false>(code[i], target) && *target) {
-            op = *target;
-            entry.blockReference = target;
-            entry.block = firstOpToCodeBlock(op);
-            continue;
-          }
-        } else if (code[i].equalsForOpMatching(*op)) {
-          break;
-        }
-        if (!op->alternative()) {
-          if (i >= best.matchedPrefixLength) {
-            best = {op, entry.block, entry.blockReference, i};
-          }
-          goto next_entry;
-        }
-        if (compress && op->alternative()->isCheckFun() && ++funs > 5) {
-          compressCheckOps<SearchStruct::FN_STRUCT>(chainStart);
-        } else if (compress && op->alternative()->isCheckGroundTerm() && ++grounds > 3) {
-          compressCheckOps<SearchStruct::GROUND_TERM_STRUCT>(chainStart);
-        } else {
-          entry.blockReference = &op->alternative();
-          op = *entry.blockReference;
-          if (!op->isSearchStruct()) {
-            entry.block = firstOpToCodeBlock(op);
-          }
-          continue;
-        }
-        op = chainStart;
-        funs = grounds = 0;
-      }
-      if (i + 1 == length) {
-        ASS(op->isLitEnd());
-        for (auto& cont : op->getILS()->continuations) {
-          for (auto checkpoint : checkpoints) {
-            if (checkpoint.first == cont.slot) {
-              nextEntries.push({cont.entry, firstOpToCodeBlock(cont.entry), &cont.entry, checkpoint.second});
-              break;
-            }
-          }
-        }
-        if (op->hasSuccessor()) {
-          nextEntries.push({op + 1, entry.block, entry.blockReference, 0});
-        }
-        return {op, entry.block, entry.blockReference, length};
-      }
-      ASS(op->hasSuccessor());
-      ++op;
-    }
-next_entry:;
-  }
-  return best;
-}
-
-void ClauseCodeTree::incorporate(CodeStack& code)
-{
-  // Empty clauses contain only SUCCESS and need no literal-prefix matching.
-  if (code.length() == 1) {
-    CodeTree::incorporate(code);
-    return;
-  }
-
-  ASS(code.top().isSuccess());
-  Stack<unsigned> starts, overlaps;
-  starts.push(0);
-  for (unsigned i = 0; i + 1 < code.length(); ++i) {
-    if (code[i].isLitEnd()) {
-      starts.push(i + 1);
-    }
-  }
-  unsigned clen = starts.length() - 1;
-  ASS_G(clen, 0);
-  for (unsigned i = 0; i < clen; ++i) {
-    overlaps.push(i + 1 < clen ? sharedPrefix(&code[starts[i]], &code[starts[i+1]]) : 0);
-  }
-
-  Stack<InsertionPosition> entries, nextEntries;
-  if (!isEmpty()) {
-    entries.push({getEntryPoint(), getEntryBlock(), &_entryPoint, 0});
-  }
-  unsigned lit = 0, matchedCnt = 0;
-  ILStruct* previous = nullptr;
-  CodeOp** tailTarget = &_entryPoint;
-  CodeBlock* append = nullptr;
-  InsertionPosition last;
-  for (; lit < clen && !isEmpty(); ++lit) {
-    auto match = matchCode(&code[starts[lit]], starts[lit+1] - starts[lit], entries,
-                           lit ? overlaps[lit-1] : 0, nextEntries, true);
-    matchedCnt = starts[lit] + match.matchedPrefixLength;
-    if (!match.op) {
-      // The preceding LIT_END has no compatible continuation.
-      ASS(previous);
-      append = last.block;
-      tailTarget = last.blockReference;
-      break;
-    }
-    if (matchedCnt != starts[lit+1]) {
-      tailTarget = &match.op->alternative();
-      break;
-    }
-    previous = match.op->getILS();
-    ++previous->refCount;
-    last = match;
-    entries = std::move(nextEntries);
-  }
-  if (lit == clen) {
-    if (previous->hasSuccessor) {
-      CodeOp* op = last.op + 1;
-      while (op->alternative()) {
-        op = op->alternative();
-      }
-      tailTarget = &op->alternative();
-    } else {
-      append = last.block;
-      tailTarget = last.blockReference;
-    }
-  }
-
-  // Build the unmatched suffix. A selected NEXT terminates a block at LIT_END
-  // and redirects the next block into that literal end's bin
-  static const unsigned int nextThreshold = 7;
-  for (unsigned pos = matchedCnt; pos < code.length();) {
-    CodeStack suffix;
-    unsigned nextPosition = 0;
-    ILStruct* split = nullptr;
-    bool useNext = false;
-    for (unsigned i = pos; i < code.length(); ++i) {
-      if (lit < clen && overlaps[lit] > nextThreshold && i == starts[lit] + overlaps[lit]) {
-        nextPosition = suffix.length();
-        suffix.push(CodeOp::getNext(0));
-        useNext = true;
-      }
-      suffix.push(code[i]);
-      if (code[i].isLitEnd()) {
-        code[i].getILS()->hasSuccessor = true;
-        if (useNext) {
-          split = code[i].getILS();
-          pos = starts[lit+1] + overlaps[lit];
-          ++lit;
-          break;
-        }
-        ++lit;
-      }
-      pos = i + 1;
-    }
-    CodeBlock* block = CodeTree::buildBlock(suffix, suffix.length(), previous);
-    if (append) {
-      unsigned offset = append->length();
-      CodeBlock* joined = CodeBlock::allocate(offset + block->length());
-      for (unsigned i = 0; i < offset; ++i) {
-        (*joined)[i] = (*append)[i];
-      }
-      for (unsigned i = 0; i < block->length(); ++i) {
-        (*joined)[offset+i] = (*block)[i];
-      }
-      previous->hasSuccessor = true;
-      nextPosition += offset;
-      append->deallocate();
-      block->deallocate();
-      block = joined;
-      append = nullptr;
-    }
-    *tailTarget = &(*block)[0];
-    if (split) {
-      split->hasSuccessor = false;
-      unsigned slot = split->previous ? split->previous->successorSlotCount++ : firstLiteralSlotCount++;
-      (*block)[nextPosition]._setArg(slot);
-      split->continuations.push({slot, nullptr});
-      split->hasContinuations = true;
-      tailTarget = &split->continuations.top().entry;
-      previous = split;
-    }
-  }
-
-  // Discard only the unused shared prefix
-  for (unsigned i = 0; i < matchedCnt; ++i) {
-    if (code[i].isLitEnd()) {
-      delete code[i].getILS();
-    }
-  }
-  code.reset();
-}
-
 void ClauseCodeTree::optimizeLiteralOrder(DArray<Literal*>& lits)
 {
-  lits.sort(InitialLiteralOrderingComparator());
   unsigned clen=lits.size();
-  if (clen < 2) {
+  if(isEmpty() || clen<=1) {
     return;
   }
 
-  CodeStack code;
-  LitCompiler compiler(code);
-  DArray<CodeStack> codes(clen);
-  for (unsigned i = 0; i < clen; ++i) {
-    compiler.nextLit();
-    compiler.handleTerm(lits[i]);
-    codes[i] = std::move(code);
-  }
+  lits.sort(InitialLiteralOrderingComparator());
 
-  Stack<InsertionPosition> entries, nextEntries;
-  if (!isEmpty()) {
-    entries.push({getEntryPoint(), getEntryBlock(), &_entryPoint, 0});
-  }
-  unsigned start = 0;
-  for (; start + 1 < clen && entries.isNonEmpty(); start++) {
-    unsigned best = start;
-    unsigned bestShared = 0;
-    bool complete = false;
-    for (unsigned i = start; i < clen; i++) {
-      unsigned prefix = start ? sharedPrefix(codes[start-1].begin(), codes[i].begin()) : 0;
-      auto match = matchCode(codes[i].begin(), codes[i].length(), entries, prefix, nextEntries, false);
-      if (match.matchedPrefixLength == codes[i].length()) {
-        best = i;
-        complete = true;
-        break;
-      }
-      if (match.matchedPrefixLength > bestShared && (!lits[best]->ground() || lits[i]->ground())) {
-        best = i;
-        bestShared = match.matchedPrefixLength;
-      }
-    }
-    std::swap(lits[start], lits[best]);
-    std::swap(codes[start], codes[best]);
-    if (!complete) {
-      break;
-    }
-    entries = std::move(nextEntries);
-  }
+  CodeOp* entry=getEntryPoint();
+  for(unsigned startIndex=0;startIndex<clen-1;startIndex++) {
+//  for(unsigned startIndex=0;startIndex<1;startIndex++) {
 
-  // Beyond the shared clause prefix, favour consecutive literal overlaps.
-  for (; start + 1 < clen; start++) {
-    unsigned best = start + 1;
-    unsigned bestShared = sharedPrefix(codes[start].begin(), codes[best].begin());
-    for (unsigned i = best + 1; i < clen; ++i) {
-      unsigned shared = sharedPrefix(codes[start].begin(), codes[i].begin());
-      if (shared > bestShared && (!lits[best]->ground() || lits[i]->ground())) {
-        best = i;
-        bestShared = shared;
+    size_t unshared=1;
+    unsigned bestIndex=startIndex;
+    size_t bestSharedLen;
+    bool bestGround=lits[startIndex]->ground();
+    CodeOp* nextOp;
+    evalSharing(lits[startIndex], entry, bestSharedLen, unshared, nextOp);
+    if(!unshared) {
+      goto have_best;
+    }
+
+    for(unsigned i=startIndex+1;i<clen;i++) {
+      size_t sharedLen;
+      evalSharing(lits[i], entry, sharedLen, unshared, nextOp);
+      if(!unshared) {
+	bestIndex=i;
+        goto have_best;
+      }
+
+      if(sharedLen>bestSharedLen && (!bestGround || lits[i]->ground()) ) {
+//	cout<<lits[i]->toString()<<" is better than "<<lits[bestIndex]->toString()<<endl;
+	bestSharedLen=sharedLen;
+	bestIndex=i;
+	bestGround=lits[i]->ground();
       }
     }
-    std::swap(lits[start+1], lits[best]);
-    std::swap(codes[start+1], codes[best]);
-  }
-  for (auto& literal : codes) {
-    delete literal.top().getILS();
+
+  have_best:
+    swap(lits[startIndex],lits[bestIndex]);
+
+    if(unshared) {
+      //we haven't matched the whole literal, so we won't proceed with the next one
+      return;
+    }
+    ASS(nextOp);
+    entry=nextOp;
   }
 }
+
+void ClauseCodeTree::evalSharing(Literal* lit, CodeOp* startOp, size_t& sharedLen, size_t& unsharedLen, CodeOp*& nextOp)
+{
+  CodeStack code;
+  LitCompiler compiler(code);
+
+  compiler.handleTerm(lit);
+
+  matchCode(code, startOp, sharedLen, nextOp);
+
+  unsharedLen=code.size()-sharedLen;
+
+  ASS(code.top().isLitEnd());
+  delete code.pop().getILS();
+}
+
+/**
+ * Match the operations in @b code CodeStack on the code starting at @b startOp.
+ *
+ * Into @b matchedCnt assign number of matched operations and into @b lastAttemptedOp
+ * the last operation on which we have attempted matching. If @b matchedCnt==code.size(),
+ * the @b lastAttemptedOp is equal to the last operation in the @b code stack, otherwise
+ * it is the first operation on which mismatch occurred and there was no alternative to
+ * proceed to (in this case it therefore holds that @b lastAttemptedOp->alternative==0 ).
+ */
+void ClauseCodeTree::matchCode(CodeStack& code, CodeOp* startOp, size_t& matchedCnt, CodeOp*& nextOp)
+{
+  size_t clen=code.length();
+  CodeOp* treeOp=startOp;
+
+  for(size_t i=0;i<clen;i++) {
+    for(;;) {
+      if(treeOp->isSearchStruct()) {
+	SearchStruct* ss=treeOp->getSearchStruct();
+	CodeOp** toPtr;
+	if(ss->getTargetOpPtr<false>(code[i], toPtr) && *toPtr) {
+	  treeOp=*toPtr;
+	  continue;
+	}
+      }
+      else if(code[i].equalsForOpMatching(*treeOp)) {
+	break;
+      }
+      ASS_NEQ(treeOp,treeOp->alternative());
+      treeOp=treeOp->alternative();
+      if(!treeOp) {
+	matchedCnt=i;
+	nextOp=0;
+	return;
+      }
+    }
+
+    //the SEARCH_STRUCT operation does not occur in a CodeBlock
+    ASS(!treeOp->isSearchStruct());
+    //we can safely do increase because as long as we match and something
+    //remains in the @b code stack, we aren't at the end of the CodeBlock
+    //either (as each code block contains at least one FAIL or SUCCESS
+    //operation, and CodeStack contains at most one SUCCESS as the last
+    //operation)
+    treeOp++;
+  }
+  //we matched the whole CodeStack
+  matchedCnt=clen;
+  nextOp=treeOp;
+}
+
 
 //////////////// removal ////////////////////
 
@@ -404,25 +247,12 @@ void ClauseCodeTree::remove(Clause* cl)
     {
       Recycled<RemovingLiteralMatcher, NoReset> rrlm; // take rlm out of recycling
       rlm = &*rrlm; // get the actual content (also to use after this initialization block)
-      ILStruct* ils = nullptr;
-      if (rlms->size() > 0) {
-        rlms->top()->doEagerMatching();
-        ils = rlms->top()->op->getILS();
-      }
-      CodeOp* newLitEntry;
-      if (ils) {
-        newLitEntry = ils->hasSuccessor ? rlms->top()->op + 1 : nullptr;
-      } else {
-        newLitEntry = getEntryPoint();
-      }
-      rlm->init(newLitEntry, lInfos.array(), lInfos.size(), this, &*firstsInBlocks,
-          ils ? ils->successorSlotCount : firstLiteralSlotCount,
-          ils ? &ils->continuations : nullptr, ils ? &*rlms->top() : nullptr);
+      rlm->init(op, lInfos.array(), lInfos.size(), *this, &*firstsInBlocks); // init it
       rlms->push(std::move(rrlm)); // store it in rlms (along with the obligation to return to recycling when no longer used)
     }
 
   iteration_restart:
-    if(!rlm->next()) {
+    if(!rlm->execute()) {
       if(depth==0) {
         ASSERTION_VIOLATION;
         INVALID_OPERATION("clause to be removed was not found");
@@ -443,8 +273,9 @@ void ClauseCodeTree::remove(Clause* cl)
     }
     op->getILS()->timestamp=_curTimeStamp;
 
+    op++;
     if(depth==clen-1) {
-      if(op->hasSuccessor() && removeOneOfAlternatives(op+1, cl, &*firstsInBlocks)) {
+      if(removeOneOfAlternatives(op, cl, &*firstsInBlocks)) {
         //successfully removed
         break;
       }
@@ -459,35 +290,11 @@ void ClauseCodeTree::remove(Clause* cl)
   }
 }
 
-void ClauseCodeTree::RemovingLiteralMatcher::doEagerMatching()
-{
-  if (_eagerlyMatched) return;
-
-  ASS(eagerResults.isEmpty());
-
-  //backup the current op
-  CodeOp* currOp=op;
-  Stack<CodeOp*> currFirstInBlocks = *RemovingBase::firstsInBlocks;
-
-  while(execute()) {
-    eagerResults.push(op);
-    eagerResultsFirstInBlocks.push(*RemovingBase::firstsInBlocks);
-  }
-
-  _eagerlyMatched=true;
-
-  op=currOp; //restore the current op
-  *RemovingBase::firstsInBlocks = currFirstInBlocks;
-}
-
 void ClauseCodeTree::RemovingLiteralMatcher::init(CodeOp* entry_, LitInfo* linfos_,
-    size_t linfoCnt_, ClauseCodeTree* tree_, Stack<CodeOp*>* firstsInBlocks_, unsigned slotCount,
-    const Stack<ILStruct::Continuation>* continuations_, const Matcher</*removing*/true,false>* source_)
+    size_t linfoCnt_, const ClauseCodeTree& tree_, Stack<CodeOp*>* firstsInBlocks_)
 {
-  Matcher::init(*tree_, entry_, linfos_, linfoCnt_, firstsInBlocks_, slotCount, continuations_, source_);
-  eagerResults.reset();
-  eagerResultsFirstInBlocks.reset();
-  _eagerlyMatched = false;
+  Matcher::init(tree_, entry_, linfos_, linfoCnt_, firstsInBlocks_);
+
   ALWAYS(prepareLiteral());
 }
 
@@ -522,14 +329,11 @@ bool ClauseCodeTree::removeOneOfAlternatives(CodeOp* op, Clause* cl, Stack<CodeO
  */
 void ClauseCodeTree::LiteralMatcher::init(const CodeTree& tree_, CodeOp* entry_,
 					  LitInfo* linfos_, size_t linfoCnt_,
-					  bool seekOnlySuccess,
-            const Stack<CodeTree::ILStruct::Continuation>* continuations_,
-            const Matcher</*removing*/false,false>* source_,
-            unsigned slotCount)
+					  bool seekOnlySuccess)
 {
   ASS_G(linfoCnt_,0);
 
-  Matcher::init(tree_,entry_,linfos_,linfoCnt_, 0, slotCount, continuations_, source_);
+  Matcher::init(tree_,entry_,linfos_,linfoCnt_);
 
   _eagerlyMatched=false;
   eagerResults.reset();
@@ -552,8 +356,7 @@ void ClauseCodeTree::LiteralMatcher::init(const CodeTree& tree_, CodeOp* entry_,
     return;
   }
 
-  // Subsumption resolution pruning may leave no usable checkpoint to prepare
-  prepareLiteral();
+  ALWAYS(prepareLiteral());
 }
 
 /**
@@ -584,32 +387,6 @@ bool ClauseCodeTree::LiteralMatcher::next()
   if(op->isLitEnd()) {
     recordMatch();
   }
-  return true;
-}
-
-bool ClauseCodeTree::RemovingLiteralMatcher::next()
-{
-  if(_eagerlyMatched) {
-    _matched=!eagerResults.isEmpty();
-    if(!_matched) {
-      return false;
-    }
-    op=eagerResults.pop();
-    *RemovingBase::firstsInBlocks = eagerResultsFirstInBlocks.pop();
-    return true;
-  }
-
-  if(finished()) {
-    //all possible matches are exhausted
-    return false;
-  }
-
-  _matched=execute();
-  if(!_matched) {
-    return false;
-  }
-
-  ASS(op->isLitEnd() || op->isSuccess());
   return true;
 }
 
@@ -673,8 +450,6 @@ void ClauseCodeTree::LiteralMatcher::recordMatch()
   if(!ils->matchCnt && linfos[curLInfo].opposite) {
     //if we're matching opposite matches, we have already tried all non-opposite ones
     ils->noNonOppositeMatches=true;
-  } else if (ils->noNonOppositeMatches && !linfos[curLInfo].opposite) {
-    ils->noNonOppositeMatches=false;
   }
   ils->addMatch(linfos[curLInfo].liIndex, bindings);
 }
@@ -750,7 +525,7 @@ void ClauseCodeTree::ClauseMatcher::init(ClauseCodeTree* tree_, Clause* query_, 
   }
 
   tree->incTimeStamp();
-  enterLiteral(tree->getEntryPoint(), clen==0, nullptr);
+  enterLiteral(tree->getEntryPoint(), clen==0);
 }
 
 void ClauseCodeTree::ClauseMatcher::reset()
@@ -772,7 +547,7 @@ void ClauseCodeTree::ClauseMatcher::reset()
  */
 Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
 {
-  TIME_TRACE("Clause Matcher next current")
+  TIME_TRACE("Clause Matcher next master")
   if(lms.isEmpty()) {
     return 0;
   }
@@ -801,22 +576,23 @@ Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
     else if(canEnterLiteral(lm->op)) {
       ASS(lm->op->isLitEnd());
       ASS_LE(lms.size(), query->length()); //this is due to the seekOnlySuccess part below
-      ILStruct* ils = lm->op->getILS();
 
-      CodeOp* newLitEntry=ils->hasSuccessor ? lm->op+1 : nullptr;
+      //LIT_END is never the last operation in the CodeBlock,
+      //so we can increase here
+      CodeOp* newLitEntry=lm->op+1;
 
       //check that we have cleared the sresLiteral value if it is no longer valid
       ASS(!sres || sresLiteral==sresNoLiteral || sresLiteral<lms.size()-1);
 
       if(sres && sresLiteral==sresNoLiteral) {
 	//we check whether we haven't matched only opposite literals on the previous level
-	if(ils->noNonOppositeMatches) {
+	if(lm->getILS()->noNonOppositeMatches) {
 	  sresLiteral=lms.size()-1;
 	}
       }
 
       bool seekOnlySuccess=lms.size()==query->length();
-      enterLiteral(newLitEntry, seekOnlySuccess, ils);
+      enterLiteral(newLitEntry, seekOnlySuccess);
     }
   }
 }
@@ -831,61 +607,31 @@ inline bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
     return false;
   }
 
-  if(lms.size()==query->length()) {
-    // Only seek SUCCESS here, NEXT continuations require another literal match
-    if(!ils->hasSuccessor) {
-      // Since there will be no direct SUCCESS for continuations, we can stop here
-      ils->visited=true;
-      ils->finished=true;
-      return false;
+  if(lms.size()>1) {
+    //we have already matched and entered some index literals, so we
+    //will check for compatibility of variable assignments
+    if(ils->varCnt && !lms.top()->eagerlyMatched()) {
+      lms.top()->doEagerMatching();
+      RSTAT_MST_INC("match count", lms.size()-1, lms.top()->getILS()->matchCnt);
     }
-  } else if(ils->reachedByNextOp()) {
-    LiteralMatcher* top = &*lms.top();
-    // Record all checkpoints before checking or replaying continuations
-    if(!top->eagerlyMatched()) {
-      top->doEagerMatching();
-      RSTAT_MST_INC("match count", lms.size()-1, top->getILS()->matchCnt);
-    }
-    if(!ils->hasSuccessor) {
-      bool empty = true;
-      for (const Continuation& cont: ils->continuations) {
-        if (top->checkpointSlots[cont.slot].isNonEmpty()) {
-          empty = false;
-          break;
-        }
-      }
-      if (empty) {
-        // No successor or checkpoints remain; stop recording matches
-        ils->visited=true;
-        ils->finished=true;
-        return false;
-      }
-    }
-  }
-
-  //we have already matched and entered some index literals, so we
-  //will check for compatibility of variable assignments
-  if(!lms.top()->eagerlyMatched()) {
-    lms.top()->doEagerMatching();
-    RSTAT_MST_INC("match count", lms.size()-1, lms.top()->getILS()->matchCnt);
-  }
-  for(size_t ilIndex=0;ilIndex<lms.size()-1;ilIndex++) {
-    ILStruct* prevILS=lms[ilIndex]->getILS();
-    if(!lms[ilIndex]->eagerlyMatched()) {
+    for(size_t ilIndex=0;ilIndex<lms.size()-1;ilIndex++) {
+      ILStruct* prevILS=lms[ilIndex]->getILS();
+      if(prevILS->varCnt && !lms[ilIndex]->eagerlyMatched()) {
 	lms[ilIndex]->doEagerMatching();
 	RSTAT_MST_INC("match count", ilIndex, lms[ilIndex]->getILS()->matchCnt);
-    }
+      }
 
-    size_t matchIndex=ils->matchCnt;
-    while(matchIndex!=0) {
+      size_t matchIndex=ils->matchCnt;
+      while(matchIndex!=0) {
 	matchIndex--;
 	MatchInfo* mi=ils->getMatch(matchIndex);
 	if(!existsCompatibleMatch(ils, mi, prevILS)) {
 	  ils->deleteMatch(matchIndex); //decreases ils->matchCnt
 	}
-    }
-    if(!ils->matchCnt) {
+      }
+      if(!ils->matchCnt) {
 	return false;
+      }
     }
   }
 
@@ -900,28 +646,19 @@ inline bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
  *   (this is to be used when all literals are matched so we want
  *   to see just clauses that end at this point).
  */
-void ClauseCodeTree::ClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuccess, ILStruct* ils)
+void ClauseCodeTree::ClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuccess)
 {
   if(!seekOnlySuccess) {
     RSTAT_MCTR_INC("enterLiteral levels (non-sos)", lms.size());
   }
 
-  //the checkpoints of the new literal matcher are read from the previous literal matcher's continuations
-  const Stack<Continuation>* continuations = nullptr;
-  const Matcher</*removing*/false,false>* source = nullptr;
-  unsigned slotCount = ils ? ils->successorSlotCount : tree->firstLiteralSlotCount;
-  if(!seekOnlySuccess && ils && ils->reachedByNextOp()) {
-    continuations = &ils->continuations;
-    source = &*lms.top();
-  }
-
   if(lms.isNonEmpty()) {
     Recycled<LiteralMatcher, NoReset>& prevLM = lms.top();
-    ILStruct* prevIls=prevLM->op->getILS();
-    ASS_EQ(prevIls->timestamp,tree->_curTimeStamp);
-    ASS(!prevIls->visited);
-    ASS(!prevIls->finished);
-    prevIls->visited=true;
+    ILStruct* ils=prevLM->op->getILS();
+    ASS_EQ(ils->timestamp,tree->_curTimeStamp);
+    ASS(!ils->visited);
+    ASS(!ils->finished);
+    ils->visited=true;
   }
 
   size_t linfoCnt=lInfos.size();
@@ -936,7 +673,7 @@ void ClauseCodeTree::ClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuc
   }
 
   Recycled<LiteralMatcher, NoReset> lm;
-  lm->init(*tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess, continuations, source, slotCount);
+  lm->init(*tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess);
   lms.push(std::move(lm));
 }
 
@@ -1176,4 +913,6 @@ bool ClauseCodeTree::ClauseMatcher::existsCompatibleMatch(ILStruct* si, MatchInf
   return false;
 }
 
+}
+}
 }

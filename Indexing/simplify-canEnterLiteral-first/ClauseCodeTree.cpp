@@ -32,6 +32,8 @@
 
 namespace Indexing
 {
+namespace Ablation {
+namespace SimplifyCanEnterFirst {
 
 using namespace std;
 using namespace Lib;
@@ -772,7 +774,7 @@ void ClauseCodeTree::ClauseMatcher::reset()
  */
 Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
 {
-  TIME_TRACE("Clause Matcher next current")
+  TIME_TRACE("Clause Matcher next simplifyCanEnterFirst")
   if(lms.isEmpty()) {
     return 0;
   }
@@ -831,15 +833,7 @@ inline bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
     return false;
   }
 
-  if(lms.size()==query->length()) {
-    // Only seek SUCCESS here, NEXT continuations require another literal match
-    if(!ils->hasSuccessor) {
-      // Since there will be no direct SUCCESS for continuations, we can stop here
-      ils->visited=true;
-      ils->finished=true;
-      return false;
-    }
-  } else if(ils->reachedByNextOp()) {
+  if (ils->reachedByNextOp() && lms.size()!=query->length()) {
     LiteralMatcher* top = &*lms.top();
     // Record all checkpoints before checking or replaying continuations
     if(!top->eagerlyMatched()) {
@@ -1176,4 +1170,6 @@ bool ClauseCodeTree::ClauseMatcher::existsCompatibleMatch(ILStruct* si, MatchInf
   return false;
 }
 
+}
+}
 }

@@ -32,6 +32,8 @@
 
 namespace Indexing
 {
+namespace Ablation {
+namespace SimplifyCanEnterSecond {
 
 using namespace std;
 using namespace Lib;
@@ -772,7 +774,7 @@ void ClauseCodeTree::ClauseMatcher::reset()
  */
 Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
 {
-  TIME_TRACE("Clause Matcher next current")
+  TIME_TRACE("Clause Matcher next simplifyCanEnterSecond")
   if(lms.isEmpty()) {
     return 0;
   }
@@ -838,28 +840,6 @@ inline bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
       ils->visited=true;
       ils->finished=true;
       return false;
-    }
-  } else if(ils->reachedByNextOp()) {
-    LiteralMatcher* top = &*lms.top();
-    // Record all checkpoints before checking or replaying continuations
-    if(!top->eagerlyMatched()) {
-      top->doEagerMatching();
-      RSTAT_MST_INC("match count", lms.size()-1, top->getILS()->matchCnt);
-    }
-    if(!ils->hasSuccessor) {
-      bool empty = true;
-      for (const Continuation& cont: ils->continuations) {
-        if (top->checkpointSlots[cont.slot].isNonEmpty()) {
-          empty = false;
-          break;
-        }
-      }
-      if (empty) {
-        // No successor or checkpoints remain; stop recording matches
-        ils->visited=true;
-        ils->finished=true;
-        return false;
-      }
     }
   }
 
@@ -1176,4 +1156,6 @@ bool ClauseCodeTree::ClauseMatcher::existsCompatibleMatch(ILStruct* si, MatchInf
   return false;
 }
 
+}
+}
 }

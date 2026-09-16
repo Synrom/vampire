@@ -32,6 +32,8 @@
 
 namespace Indexing
 {
+namespace Ablation {
+namespace Ordering {
 
 using namespace std;
 using namespace Lib;
@@ -351,6 +353,7 @@ void ClauseCodeTree::optimizeLiteralOrder(DArray<Literal*>& lits)
   }
 
   // Beyond the shared clause prefix, favour consecutive literal overlaps.
+  static const unsigned int nextThreshold = 7;
   for (; start + 1 < clen; start++) {
     unsigned best = start + 1;
     unsigned bestShared = sharedPrefix(codes[start].begin(), codes[best].begin());
@@ -361,8 +364,10 @@ void ClauseCodeTree::optimizeLiteralOrder(DArray<Literal*>& lits)
         bestShared = shared;
       }
     }
-    std::swap(lits[start+1], lits[best]);
-    std::swap(codes[start+1], codes[best]);
+    if (bestShared > nextThreshold) {
+      std::swap(lits[start+1], lits[best]);
+      std::swap(codes[start+1], codes[best]);
+    }
   }
   for (auto& literal : codes) {
     delete literal.top().getILS();
@@ -772,7 +777,7 @@ void ClauseCodeTree::ClauseMatcher::reset()
  */
 Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
 {
-  TIME_TRACE("Clause Matcher next current")
+  TIME_TRACE("Clause Matcher next ordering")
   if(lms.isEmpty()) {
     return 0;
   }
@@ -1176,4 +1181,6 @@ bool ClauseCodeTree::ClauseMatcher::existsCompatibleMatch(ILStruct* si, MatchInf
   return false;
 }
 
+}
+}
 }
