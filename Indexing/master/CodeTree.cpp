@@ -59,6 +59,9 @@ using namespace std;
 using namespace Lib;
 using namespace Kernel;
 
+size_t CodeTree::executedOpsCount = 0;
+size_t CodeTree::executedNextOpsCount = 0;
+
 //////////////// general datastructures ////////////////////
 
 CodeTree::LitInfo::LitInfo(Clause* cl, unsigned litIndex)
@@ -559,6 +562,7 @@ bool CodeTree::Matcher<removing, checkRange>::execute()
 
   bool shouldBacktrack=false;
   for(;;) {
+    CodeTree::executedOpsCount++;
     if(op->alternative()) {
       if constexpr (removing) {
         btStack.push(BTPointRemoving(tp, op->alternative(), RemovingBase::firstsInBlocks->size()));

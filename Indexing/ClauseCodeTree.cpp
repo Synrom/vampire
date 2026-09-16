@@ -28,7 +28,7 @@
 #include "ClauseCodeTree.hpp"
 
 #undef RSTAT_COLLECTION
-#define RSTAT_COLLECTION 0
+#define RSTAT_COLLECTION 1
 
 namespace Indexing
 {
@@ -240,7 +240,7 @@ void ClauseCodeTree::incorporate(CodeStack& code)
 
   // Build the unmatched suffix. A selected NEXT terminates a block at LIT_END
   // and redirects the next block into that literal end's bin
-  static const unsigned int nextThreshold = 7;
+  static const unsigned int nextThreshold = 1;
   for (unsigned pos = matchedCnt; pos < code.length();) {
     CodeStack suffix;
     unsigned nextPosition = 0;
@@ -773,6 +773,15 @@ void ClauseCodeTree::ClauseMatcher::reset()
 Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
 {
   TIME_TRACE("Clause Matcher next current")
+  CodeTree::executedOpsCount = 0;
+  CodeTree::executedNextOpsCount = 0;
+  struct RecordOpCounts {
+    ~RecordOpCounts() {
+      RSTAT_CTR_INC_MANY("executed code ops current", CodeTree::executedOpsCount);
+      RSTAT_CTR_INC_MANY("executed next ops current", CodeTree::executedNextOpsCount);
+      RSTAT_CTR_INC("clause matcher calls current");
+    }
+  } recordOpCounts;
   if(lms.isEmpty()) {
     return 0;
   }
