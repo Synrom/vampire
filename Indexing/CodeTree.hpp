@@ -15,6 +15,8 @@
 #ifndef __CodeTree__
 #define __CodeTree__
 
+#include <tuple>
+
 #include "Forwards.hpp"
 
 #include "Lib/Allocator.hpp"
@@ -114,10 +116,42 @@ public:
 
     struct GVArrComparator;
 
+    /**
+     * A slot into matcher's recorded checkpoints, paired with
+     * where to resume matching a successor literal using those checkpoints
+     */
+    struct Continuation {
+      unsigned slot;
+      CodeOp* entry;
+    };
+
+    unsigned timestamp;
+    unsigned matchCnt;
+    unsigned varCnt;
+    bool visited;
+    bool finished;
+    bool noNonOppositeMatches;
+    bool hasSuccessor=false;
+
+    bool hasContinuations=false;
+    inline bool reachedByNextOp() const { return hasContinuations; }
+
     unsigned depth;
     ILStruct* previous;
 
-    unsigned varCnt;
+    /**
+     * Number of checkpoint slots the matcher for the successor literal
+     * (the one compiled right after this ILStruct) must allocate
+     */
+    unsigned successorSlotCount=0;
+    /**
+     * Continuations recorded on this ILStruct
+     */
+    Stack<Continuation> continuations;
+    bool jumpsToOp(CodeOp* op) const;
+    void replaceJump(CodeOp* oldOp, CodeOp* newOp);
+    // just for deletion
+    unsigned refCount=1;
 
     unsigned* globalVarNumbers;
 
@@ -127,19 +161,10 @@ public:
      *  correspond to the sortedGlobalVarNumbers */
     unsigned* globalVarPermutation;
 
-    unsigned timestamp;
-    //from here on, the values are valid only if the timestamp is current
-
     void addMatch(unsigned liIndex, DArray<TermList>& bindingArray);
     void deleteMatch(unsigned matchIndex);
     MatchInfo*& getMatch(unsigned matchIndex);
 
-    unsigned matchCnt;
-
-    /** all possible lits were tried to match */
-    bool visited;
-    bool finished;
-    bool noNonOppositeMatches;
   private:
     DArray<MatchInfo*> matches;
   };
@@ -154,9 +179,10 @@ public:
     ASSIGN_VAR = 4,
     CHECK_VAR = 5,
     SEARCH_STRUCT = 6,
+    NEXT = 7,
   };
   static const unsigned INSTRUCTION_BITS = 3;
-  static_assert(SEARCH_STRUCT < 1 << INSTRUCTION_BITS, "Instruction should fit within INSTRUCTION_BITS");
+  static_assert(NEXT < 1 << INSTRUCTION_BITS, "Instruction should fit within INSTRUCTION_BITS");
 
   /** Structure containing a single instruction and its arguments */
   struct CodeOp
@@ -173,6 +199,7 @@ public:
     static CodeOp getLitEnd(ILStruct* ils);
     static CodeOp getTermOp(Instruction i, unsigned num);
     static CodeOp getGroundTermCheck(const Term* trm);
+    static CodeOp getNext(unsigned num);
 
     bool equalsForOpMatching(const CodeOp& o) const;
 
@@ -189,6 +216,12 @@ public:
     inline bool isSearchStruct() const { return _instruction()==SEARCH_STRUCT; }
     inline bool isCheckFun() const { return _instruction()==CHECK_FUN; }
     inline bool isCheckGroundTerm() const { return _instruction()==CHECK_GROUND_TERM; }
+    inline bool isNext() const { return _instruction()==NEXT; }
+    inline bool hasSuccessor() const {
+      if (_instruction() == SUCCESS_OR_FAIL) return false;
+      if (isLitEnd()) return getILS()->hasSuccessor;
+      return true;
+    }
 
     inline Term* getTargetTerm() const
     {
@@ -309,6 +342,8 @@ public:
     size_t initFIBDepth;
     bool matchingClauses;
     DHSet<unsigned, FnvHash, IdentityHash> range;
+    /** Path to the selected parent LIT_END, restored for each replayed continuation. */
+    Stack<CodeOp*> continuationFirstsInBlocks;
   };
 
   struct NonRemovingBase {};
@@ -355,6 +390,78 @@ public:
       size_t fibDepth;
     };
 
+    /**
+     * A record of a point at which matching can be resumed at
+     * The bindings are in the recording matcher's cpBindingPool (as the slice [bindOffset,bindOffset+bindCnt))
+     */
+    struct Checkpoint
+    {
+      unsigned liIndex;
+      unsigned tp;
+      unsigned bindOffset;
+      unsigned bindCnt;
+
+      Checkpoint(unsigned liIndex_, unsigned tp_, unsigned bindOffset_, unsigned bindCnt_)
+        : liIndex(liIndex_), tp(tp_), bindOffset(bindOffset_), bindCnt(bindCnt_) {}
+    };
+
+    /**
+     * Replays the continuations recorded on a just-matched literal's
+     * ILStruct, one checkpoint at a time, without materializing them all
+     * up front. @b source is the matcher that recorded those checkpoints
+     * (into its own @b checkpointSlots); it outlives this matcher and must
+     * already have been eagerly matched, so its recorded checkpoints are
+     * complete and stable.
+     */
+    struct CheckpointCursor
+    {
+      void reset(const Stack<ILStruct::Continuation>* continuations_, const Matcher* source_)
+      {
+        continuations = continuations_;
+        source = source_;
+        pos = 0;
+        cur = end = nullptr;
+        entry = nullptr;
+      }
+
+      /**
+       * Advances to the next checkpoint still relevant to @b linfoCnt
+       * literals, or returns nullptr once every continuation has been
+       * replayed. On a non-null return, @b entry names where to resume
+       * matching with the returned checkpoint's bindings.
+       */
+      const Checkpoint* next(size_t linfoCnt)
+      {
+        while (continuations && (cur != end || pos < continuations->size())) {
+          if (cur == end) {
+            const ILStruct::Continuation& cont = (*continuations)[pos++];
+            const Stack<Checkpoint>& slot = source->checkpointSlots[cont.slot];
+            cur = slot.begin();
+            end = slot.end();
+            entry = cont.entry;
+            continue;
+          }
+          const Checkpoint& cp = *(cur++);
+          // Subsumption resolution pruning can exclude opposite-literal checkpoints.
+          if (cp.liIndex >= linfoCnt) {
+            continue;
+          }
+          return &cp;
+        }
+        return nullptr;
+      }
+
+      const Stack<ILStruct::Continuation>* continuations = nullptr;
+      const Matcher* source = nullptr;
+      /** number of continuations opened so far, in order */
+      size_t pos = 0;
+      /** iteration bounds within the currently open continuation's slot */
+      const Checkpoint* cur = nullptr;
+      const Checkpoint* end = nullptr;
+      /** resume point of the currently open continuation */
+      CodeOp* entry = nullptr;
+    };
+
     inline bool finished() const { return !fresh && !_matched; }
     inline bool matched() const { return _matched && op->isLitEnd(); }
     inline bool success() const { return _matched && op->isSuccess(); }
@@ -371,6 +478,19 @@ public:
 
     BindingArray bindings;
 
+    /** Checkpoints recorded by NEXT ops encountered while this matcher runs */
+    DArray<Stack<Checkpoint>> checkpointSlots;
+    /** Bindings of the recorded checkpoints in @b checkpointSlots */
+    Stack<TermList> cpBindingPool;
+    /** Indices of the slots in @b checkpointSlots that contain checkpoints
+     * (so that @b init only needs to reset those) */
+    Stack<unsigned> touchedSlots;
+    CheckpointCursor cpCursor;
+    /** true while we are matching from @b entry. once the entry code is
+     * exhausted we continue with the replayed checkpoints */
+    bool executingNormally = false;
+    unsigned boundedSize=0;
+
     bool keepRecycled() const
     {
       if constexpr (removing) {
@@ -383,13 +503,15 @@ public:
 
   protected:
     void init(const CodeTree& tree_, CodeOp* entry_, LitInfo* linfos_ = 0,
-      size_t linfoCnt_ = 0, Stack<CodeOp*>* firstsInBlocks_ = 0);
+      size_t linfoCnt_= 0 , Stack<CodeOp*>* firstsInBlocks_ = 0, unsigned slotCount=0,
+      const Stack<ILStruct::Continuation>* continuations_=nullptr, const Matcher* source_=nullptr);
 
     bool backtrack();
     bool prepareLiteral();
     bool doAssignVar();
     bool doCheckVar();
     bool doCheckFun();
+    void doNextOp();
     bool doCheckGroundTerm();
     bool doSearchStruct();
 
@@ -441,11 +563,57 @@ public:
   //////// auxiliary methods //////////
 
   inline bool isEmpty() const { return !_entryPoint; }
-  inline CodeOp* getEntryPoint() const { ASS(!isEmpty()); return &(*_entryPoint)[0]; }
+  inline CodeOp* getEntryPoint() const { ASS(!isEmpty()); return _entryPoint; }
+  inline CodeBlock* getEntryBlock() const { ASS(!isEmpty()); return firstOpToCodeBlock(_entryPoint); }
   static CodeBlock* firstOpToCodeBlock(CodeOp* op);
 
   template<class Visitor>
-  void visitAllOps(Visitor visitor) const;
+  void visitAllOps(Visitor visitor) const
+  {
+    // operation, depth, and flag indicating whether the next functor is a predicate
+    static Stack<std::tuple<CodeOp*,unsigned,bool>> top_ops;
+    // each top_op is either a first op of a Block or a SearchStruct
+    // but it cannot be both since SearchStructs don't occur inside blocks
+    top_ops.reset();
+
+    if(!isEmpty()) { top_ops.emplace(getEntryPoint(),0,_clauseCodeTree); }
+
+    while(top_ops.isNonEmpty()) {
+      auto [top_op,depth,litStart] = top_ops.pop();
+
+      if (top_op->isSearchStruct()) {
+        visitor(top_op, depth, litStart); // visit the landingOp inside the SearchStruct
+
+        if(top_op->alternative()) {
+          top_ops.emplace(top_op->alternative(),depth,litStart);
+        }
+
+        auto ss = top_op->getSearchStruct();
+        for (size_t i = 0; i < ss->length(); i++) {
+          if (ss->targets[i]!=0) { // zeros are allowed as targets (they are holes after removals)
+            top_ops.emplace(ss->targets[i],depth+1,litStart);
+          }
+        }
+      } else {
+        CodeBlock* cb=firstOpToCodeBlock(top_op);
+
+        CodeOp* op=&(*cb)[0];
+        ASS_EQ(top_op,op);
+        for(size_t rem=cb->length(); rem; rem--,op++) {
+          visitor(op, depth+(cb->length()-rem), litStart);
+          if(op->alternative()) {
+            top_ops.emplace(op->alternative(),depth+(cb->length()-rem),litStart);
+          }
+          if (op->isLitEnd()) {
+            for (ILStruct::Continuation& cont: op->getILS()->continuations) {
+              top_ops.emplace(cont.entry, depth + (cb->length()-rem) + 1, false);
+            }
+          }
+          litStart = op->isLitEnd();
+        }
+      }
+    }
+  }
 
   void printOp(std::ostream& out, const CodeOp& op, bool litStart) const;
   void printOps(std::ostream& out, const CodeTree& ct, const CodeStack& st) const;
@@ -498,7 +666,10 @@ public:
   /** maximal number of local variables in a stored term/literal (always at least 1) */
   unsigned _maxVarCnt = 1;
 
-  CodeBlock* _entryPoint = nullptr;
+  /** Checkpoint slots for matching the first clause literal. */
+  unsigned firstLiteralSlotCount = 0;
+
+  CodeOp* _entryPoint = nullptr;
 };
 
 }
