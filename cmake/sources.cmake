@@ -184,30 +184,6 @@ set(SOURCES
     Indexing/master/ClauseCodeTree.hpp
     Indexing/master/CodeTree.cpp
     Indexing/master/CodeTree.hpp
-    Indexing/ordering/ClauseCodeTree.cpp
-    Indexing/ordering/ClauseCodeTree.hpp
-    Indexing/ordering/CodeTree.cpp
-    Indexing/ordering/CodeTree.hpp
-    Indexing/simplify-canEnterLiteral-first/ClauseCodeTree.cpp
-    Indexing/simplify-canEnterLiteral-first/ClauseCodeTree.hpp
-    Indexing/simplify-canEnterLiteral-first/CodeTree.cpp
-    Indexing/simplify-canEnterLiteral-first/CodeTree.hpp
-    Indexing/simplify-canEnterLiteral-second/ClauseCodeTree.cpp
-    Indexing/simplify-canEnterLiteral-second/ClauseCodeTree.hpp
-    Indexing/simplify-canEnterLiteral-second/CodeTree.cpp
-    Indexing/simplify-canEnterLiteral-second/CodeTree.hpp
-    Indexing/remove-touchedSlots/ClauseCodeTree.cpp
-    Indexing/remove-touchedSlots/ClauseCodeTree.hpp
-    Indexing/remove-touchedSlots/CodeTree.cpp
-    Indexing/remove-touchedSlots/CodeTree.hpp
-    Indexing/save-bindings-directly/ClauseCodeTree.cpp
-    Indexing/save-bindings-directly/ClauseCodeTree.hpp
-    Indexing/save-bindings-directly/CodeTree.cpp
-    Indexing/save-bindings-directly/CodeTree.hpp
-    Indexing/ilstruct-simplification/ClauseCodeTree.cpp
-    Indexing/ilstruct-simplification/ClauseCodeTree.hpp
-    Indexing/ilstruct-simplification/CodeTree.cpp
-    Indexing/ilstruct-simplification/CodeTree.hpp
     Indexing/DemodulationIndex.hpp
     Indexing/DemodulationIndex.cpp
     Indexing/Index.cpp

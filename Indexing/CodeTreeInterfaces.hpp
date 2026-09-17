@@ -24,12 +24,6 @@
 #include "ClauseCodeTree.hpp"
 
 #include "master/ClauseCodeTree.hpp"
-#include "ordering/ClauseCodeTree.hpp"
-#include "simplify-canEnterLiteral-first/ClauseCodeTree.hpp"
-#include "simplify-canEnterLiteral-second/ClauseCodeTree.hpp"
-#include "remove-touchedSlots/ClauseCodeTree.hpp"
-#include "save-bindings-directly/ClauseCodeTree.hpp"
-#include "ilstruct-simplification/ClauseCodeTree.hpp"
 
 #include "Index.hpp"
 
@@ -231,12 +225,6 @@ public:
   ClauseCodeTree* getClauseCodeTree() { return &_ct; }
 
   Ablation::Master::ClauseCodeTree* getMasterTree() { return &_ctMaster; }
-  Ablation::Ordering::ClauseCodeTree* getOrderingTree() { return &_ctOrdering; }
-  Ablation::SimplifyCanEnterFirst::ClauseCodeTree* getSimplifyCanEnterFirstTree() { return &_ctSimplifyCanEnterFirst; }
-  Ablation::SimplifyCanEnterSecond::ClauseCodeTree* getSimplifyCanEnterSecondTree() { return &_ctSimplifyCanEnterSecond; }
-  Ablation::RemoveTouchedSlots::ClauseCodeTree* getRemoveTouchedSlotsTree() { return &_ctRemoveTouchedSlots; }
-  Ablation::SaveBindingsDirectly::ClauseCodeTree* getSaveBindingsDirectlyTree() { return &_ctSaveBindingsDirectly; }
-  Ablation::ILStructSimplification::ClauseCodeTree* getILStructSimplificationTree() { return &_ctILStructSimplification; }
 
 protected:
   void handleClause(Clause* c, bool adding) override {
@@ -245,23 +233,11 @@ protected:
     if(adding) {
       _ct.insert(c);
       _ctMaster.insert(c);
-      _ctOrdering.insert(c);
-      _ctSimplifyCanEnterFirst.insert(c);
-      _ctSimplifyCanEnterSecond.insert(c);
-      _ctRemoveTouchedSlots.insert(c);
-      _ctSaveBindingsDirectly.insert(c);
-      _ctILStructSimplification.insert(c);
       _trackedClauses.push_back(c);
     }
     else {
       _ct.remove(c);
       _ctMaster.remove(c);
-      _ctOrdering.remove(c);
-      _ctSimplifyCanEnterFirst.remove(c);
-      _ctSimplifyCanEnterSecond.remove(c);
-      _ctRemoveTouchedSlots.remove(c);
-      _ctSaveBindingsDirectly.remove(c);
-      _ctILStructSimplification.remove(c);
       auto it = std::find(_trackedClauses.begin(), _trackedClauses.end(), c);
       ASS(it != _trackedClauses.end());
       _trackedClauses.erase(it);
@@ -275,12 +251,6 @@ protected:
 private:
   ClauseCodeTree _ct;
   Ablation::Master::ClauseCodeTree _ctMaster;
-  Ablation::Ordering::ClauseCodeTree _ctOrdering;
-  Ablation::SimplifyCanEnterFirst::ClauseCodeTree _ctSimplifyCanEnterFirst;
-  Ablation::SimplifyCanEnterSecond::ClauseCodeTree _ctSimplifyCanEnterSecond;
-  Ablation::RemoveTouchedSlots::ClauseCodeTree _ctRemoveTouchedSlots;
-  Ablation::SaveBindingsDirectly::ClauseCodeTree _ctSaveBindingsDirectly;
-  Ablation::ILStructSimplification::ClauseCodeTree _ctILStructSimplification;
   std::vector<Clause*> _trackedClauses;
 };
 

@@ -62,12 +62,6 @@ bool CodeTreeForwardSubsumptionAndResolution::perform(Clause *cl, Clause *&repla
   // below. The current implementation's own matcher is exercised by the
   // single call below instead of being called a second time here.
   bool masterFoundMatch = ablationCallMatcherOnce(_index->getMasterTree(), cl, _subsumptionResolution);
-  ablationCallMatcherOnce(_index->getOrderingTree(), cl, _subsumptionResolution);
-  ablationCallMatcherOnce(_index->getSimplifyCanEnterFirstTree(), cl, _subsumptionResolution);
-  ablationCallMatcherOnce(_index->getSimplifyCanEnterSecondTree(), cl, _subsumptionResolution);
-  ablationCallMatcherOnce(_index->getRemoveTouchedSlotsTree(), cl, _subsumptionResolution);
-  ablationCallMatcherOnce(_index->getSaveBindingsDirectlyTree(), cl, _subsumptionResolution);
-  ablationCallMatcherOnce(_index->getILStructSimplificationTree(), cl, _subsumptionResolution);
 
   static typename ClauseCodeTree::ClauseMatcher cm;
 
