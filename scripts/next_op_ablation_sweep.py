@@ -123,18 +123,23 @@ def plot(csv_path, pdf_path, mode, fields):
     with csv_path.open() as stream:
         rows = list(csv.DictReader(stream))
     thresholds = [int(row['threshold']) for row in rows]
+    plotted_fields = [(field,) for field in fields]
     if mode == 'ablation':
         titles = ('Avg time per ClauseMatcher::next call', 'Total ClauseMatcher::next time')
         labels = ('avg time (μs)', 'total time (ms)')
         scales = (1., .001)
     else:
-        titles = ('Avg executed CodeOps (excluding NEXT)', 'Avg executed NEXT operations')
-        labels = ('avg CodeOps per next() call', 'avg NEXT ops per next() call')
-        scales = (1., 1.)
-    fig, axes = plt.subplots(1, 2, figsize=(12, 6.5))
-    for ax, field, title, label, scale in zip(axes, fields, titles, labels, scales):
+        titles = ('Avg executed CodeOps (excluding NEXT)', 'Avg executed NEXT operations',
+                  'Avg executed operations (CodeOps + NEXT)')
+        labels = ('avg CodeOps per next() call', 'avg NEXT ops per next() call',
+                  'avg total ops per next() call')
+        scales = (1., 1., 1.)
+        plotted_fields.append(tuple(fields))
+    fig, axes = plt.subplots(1, len(titles), figsize=(6 * len(titles), 6.5))
+    for ax, panel_fields, title, label, scale in zip(axes, plotted_fields, titles, labels, scales):
         for approach, color in zip(APPROACHES, COLORS):
-            values = [float(row[f'{approach}_{field}']) * scale for row in rows]
+            values = [sum(float(row[f'{approach}_{field}']) for field in panel_fields) * scale
+                      for row in rows]
             ax.plot(thresholds, values, color=color, label=approach, linewidth=2,
                     linestyle='-', marker=None)
         ax.set(title=title, xlabel='nextThreshold', ylabel=label, xticks=thresholds)
