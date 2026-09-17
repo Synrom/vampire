@@ -38,6 +38,15 @@ COLORS = [
     "#e34948",  # red
 ]
 
+# Several approaches often produce near-identical values (their changes don't
+# affect which candidates are enumerated), so their lines can coincide
+# exactly. Vary marker shape, linestyle and marker size (largest drawn first,
+# smallest on top) so every approach stays visually identifiable even when
+# stacked on top of each other.
+MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
+LINESTYLES = ["-", "--", "-.", ":", "-", "--", "-.", ":"]
+MARKER_SIZES = [11, 10, 9, 8, 7, 6.5, 6, 5.5]
+
 
 def main():
     csv_path = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO / "build-vscode/ablation-record-ops.csv"
@@ -57,9 +66,19 @@ def main():
 
     fig, (ax_ops, ax_next) = plt.subplots(1, 2, figsize=(12, 6.5))
 
-    for a, color in zip(APPROACHES, COLORS):
-        ax_ops.plot(thresholds, avg_codeops[a], marker="o", color=color, label=a, linewidth=2)
-        ax_next.plot(thresholds, avg_nextops[a], marker="o", color=color, label=a, linewidth=2)
+    for i, a in enumerate(APPROACHES):
+        style = dict(
+            marker=MARKERS[i],
+            linestyle=LINESTYLES[i],
+            color=COLORS[i],
+            markersize=MARKER_SIZES[i],
+            markerfacecolor="none",
+            markeredgewidth=1.8,
+            linewidth=2,
+            zorder=10 + i,
+        )
+        ax_ops.plot(thresholds, avg_codeops[a], label=a, **style)
+        ax_next.plot(thresholds, avg_nextops[a], label=a, **style)
 
     ax_ops.set_title("Avg executed CodeOps (excl. NEXT) per next() call")
     ax_ops.set_xlabel("nextThreshold")
