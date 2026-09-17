@@ -84,16 +84,20 @@ def run_vampire() -> str:
 
 
 LINE_RE = re.compile(
-    r"Clause Matcher next (\S+)\s+\(total:\s*([\d.]+)\s*(\S+),\s*avg:\s*([\d.]+)\s*(\S+),"
+    r"Clause Matcher next (\S+)\s+\(total:\s*([\d.]+)\s*(\S+),\s*avg:\s*([\d.]+)\s*(\S+),\s*cnt:\s*(\d+),"
 )
 
 
 def parse_times(output: str):
     times = {}
     for m in LINE_RE.finditer(output):
-        name, total_val, total_unit, avg_val, avg_unit = m.groups()
-        total_us = float(total_val) * UNIT_TO_US[total_unit]
+        name, total_val, total_unit, avg_val, avg_unit, cnt = m.groups()
         avg_us = float(avg_val) * UNIT_TO_US[avg_unit]
+        # The printed "total" auto-scales its unit for readability (e.g. switches
+        # to whole seconds with no decimals once it crosses 10s), which can lose
+        # far more precision than "avg" (always displayed in fine-grained us).
+        # Recompute total from avg * cnt instead of trusting the printed total.
+        total_us = avg_us * int(cnt)
         times[name] = (avg_us, total_us)
     return times
 
