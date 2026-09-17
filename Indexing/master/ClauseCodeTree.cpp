@@ -563,6 +563,8 @@ Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
     ~RecordOpCounts() {
       RSTAT_CTR_INC_MANY("executed code ops master", CodeTree::executedOpsCount);
       RSTAT_CTR_INC_MANY("executed next ops master", CodeTree::executedNextOpsCount);
+      RSTAT_CTR_INC_MANY("executed code ops incl next master",
+          CodeTree::executedOpsCount + CodeTree::executedNextOpsCount);
       RSTAT_CTR_INC("clause matcher calls master");
     }
   } recordOpCounts;

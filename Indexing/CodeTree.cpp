@@ -59,6 +59,9 @@ using namespace Kernel;
 
 size_t CodeTree::executedOpsCount = 0;
 size_t CodeTree::executedNextOpsCount = 0;
+size_t CodeTree::recordedCheckpointsCount = 0;
+size_t CodeTree::usedCheckpointsCount = 0;
+Stack<unsigned> CodeTree::executedNextOverlapLens;
 
 //////////////// general datastructures ////////////////////
 
@@ -781,6 +784,7 @@ bool CodeTree::Matcher<removing, checkRange>::prepareLiteral()
 
   // Resume the next checkpoint
   if (const Checkpoint* cp = cpCursor.next(linfoCnt)) {
+    CodeTree::usedCheckpointsCount++;
     const auto& pool = cpCursor.source->cpBindingPool;
     ASS(bindings.size() >= cp->bindCnt);
     ASS(cp->bindOffset <= pool.size());
@@ -885,6 +889,9 @@ inline void CodeTree::Matcher<removing, checkRange>::doNextOp()
   ASS(!op->alternative())
   unsigned slot = op->_arg();
   ASS(slot < checkpointSlots.size());
+
+  CodeTree::recordedCheckpointsCount++;
+  CodeTree::executedNextOverlapLens.push(op->getOverlapLen());
 
   // store the bindings in the pool
   unsigned bindOffset = (unsigned)cpBindingPool.size();
