@@ -146,7 +146,7 @@ void CodeTree::MatchInfo::init(ILStruct* ils, unsigned liIndex_, DArray<TermList
 
 
 CodeTree::ILStruct::ILStruct(const Literal* lit, unsigned varCnt, Stack<unsigned>& gvnStack)
-: timestamp(0), varCnt(varCnt), sortedGlobalVarNumbers(0), globalVarPermutation(0)
+: varCnt(varCnt), sortedGlobalVarNumbers(0), globalVarPermutation(0), timestamp(0)
 {
   ASS_EQ(matches.size(), 0); //we don't want any uninitialized pointers in the array
 

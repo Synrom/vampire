@@ -350,7 +350,8 @@ void ClauseCodeTree::optimizeLiteralOrder(DArray<Literal*>& lits)
     entries = std::move(nextEntries);
   }
 
-  // Beyond the shared clause prefix, favour consecutive literal overlaps.
+  // Beyond the shared clause prefix, favour overlaps that can produce NEXT.
+  static const unsigned int nextThreshold = 1;
   for (; start + 1 < clen; start++) {
     unsigned best = start + 1;
     unsigned bestShared = sharedPrefix(codes[start].begin(), codes[best].begin());
@@ -361,8 +362,10 @@ void ClauseCodeTree::optimizeLiteralOrder(DArray<Literal*>& lits)
         bestShared = shared;
       }
     }
-    std::swap(lits[start+1], lits[best]);
-    std::swap(codes[start+1], codes[best]);
+    if (bestShared > nextThreshold) {
+      std::swap(lits[start+1], lits[best]);
+      std::swap(codes[start+1], codes[best]);
+    }
   }
   for (auto& literal : codes) {
     delete literal.top().getILS();
@@ -839,39 +842,18 @@ inline bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
       ils->finished=true;
       return false;
     }
-  } else if(ils->reachedByNextOp()) {
-    LiteralMatcher* top = &*lms.top();
-    // Record all checkpoints before checking or replaying continuations
-    if(!top->eagerlyMatched()) {
-      top->doEagerMatching();
-      RSTAT_MST_INC("match count", lms.size()-1, top->getILS()->matchCnt);
-    }
-    if(!ils->hasSuccessor) {
-      bool empty = true;
-      for (const Continuation& cont: ils->continuations) {
-        if (top->checkpointSlots[cont.slot].isNonEmpty()) {
-          empty = false;
-          break;
-        }
-      }
-      if (empty) {
-        // No successor or checkpoints remain; stop recording matches
-        ils->visited=true;
-        ils->finished=true;
-        return false;
-      }
-    }
   }
 
-  //we have already matched and entered some index literals, so we
-  //will check for compatibility of variable assignments
-  if(!lms.top()->eagerlyMatched()) {
+  // Ordinary matching needs all bindings only for multi-literal compatibility.
+  // NEXT replay also needs complete, stable checkpoints before entering a child.
+  bool needsCheckpoints=ils->reachedByNextOp() && lms.size()<query->length();
+  if(((lms.size()>1 && ils->varCnt) || needsCheckpoints) && !lms.top()->eagerlyMatched()) {
     lms.top()->doEagerMatching();
     RSTAT_MST_INC("match count", lms.size()-1, lms.top()->getILS()->matchCnt);
   }
   for(size_t ilIndex=0;ilIndex<lms.size()-1;ilIndex++) {
     ILStruct* prevILS=lms[ilIndex]->getILS();
-    if(!lms[ilIndex]->eagerlyMatched()) {
+    if(prevILS->varCnt && !lms[ilIndex]->eagerlyMatched()) {
 	lms[ilIndex]->doEagerMatching();
 	RSTAT_MST_INC("match count", ilIndex, lms[ilIndex]->getILS()->matchCnt);
     }
