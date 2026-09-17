@@ -44,3 +44,8 @@ cmake-build
 **/.*.swo
 .ccls-cache
 .cache/
+
+# Generated ablation results stay local across branch switches.
+/build-vscode/*.csv
+/build-vscode/*.pdf
+/build-vscode/ablation-sweep-logs/
