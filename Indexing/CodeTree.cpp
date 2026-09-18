@@ -535,6 +535,7 @@ bool CodeTree::SearchStruct::getTargetOpPtr(const CodeOp& insertedOp, CodeOp**& 
 
 // expose for ClauseCodeTree.cpp
 template bool CodeTree::SearchStruct::getTargetOpPtr<false>(const CodeOp&, CodeOp**&);
+template bool CodeTree::SearchStruct::getTargetOpPtr<true>(const CodeOp&, CodeOp**&);
 
 CodeTree::CodeOp* CodeTree::SearchStruct::getTargetOp(const FlatTerm::Entry* ftPos)
 {
@@ -1578,7 +1579,7 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
         //there is an operation after the pointingOp that cannot be lost
         return;
       }
-      if(prevOp->isLitEnd() && (prevOp->getILS()!=previous || prevOp->getILS()->refCount)) {
+      if(prevOp->isLitEnd() && prevOp->getILS()->refCount) {
         return;
       }
       prevOp++;
