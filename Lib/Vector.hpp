@@ -30,6 +30,7 @@ namespace Indexing {
 #define VAMPIRE_ABLATION_VARIANT(Name) \
     namespace Name { class CodeTree; class ClauseCodeTree; }
     VAMPIRE_ABLATION_VARIANT(Master)
+    VAMPIRE_ABLATION_VARIANT(Ordered)
     VAMPIRE_ABLATION_VARIANT(Ordering)
     VAMPIRE_ABLATION_VARIANT(SimplifyCanEnterFirst)
     VAMPIRE_ABLATION_VARIANT(SimplifyCanEnterSecond)
@@ -132,6 +133,8 @@ public:
   friend class Indexing::ClauseCodeTree;
   friend class Indexing::Ablation::Master::CodeTree;
   friend class Indexing::Ablation::Master::ClauseCodeTree;
+  friend class Indexing::Ablation::Ordered::CodeTree;
+  friend class Indexing::Ablation::Ordered::ClauseCodeTree;
   friend class Indexing::Ablation::Ordering::CodeTree;
   friend class Indexing::Ablation::Ordering::ClauseCodeTree;
   friend class Indexing::Ablation::SimplifyCanEnterFirst::CodeTree;

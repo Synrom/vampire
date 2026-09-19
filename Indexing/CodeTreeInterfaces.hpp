@@ -24,6 +24,7 @@
 #include "ClauseCodeTree.hpp"
 
 #include "master/ClauseCodeTree.hpp"
+#include "ordered/ClauseCodeTree.hpp"
 
 #include "Index.hpp"
 
@@ -179,14 +180,15 @@ private:
  * Ported from the InvariantTester in UnitTests/tClauseCodeTrees.cpp; only
  * the checks the ablation study actually calls are kept here.
  */
+template<class Tree>
 struct InvariantTester {
-  ClauseCodeTree& tree;
-  explicit InvariantTester(ClauseCodeTree& tree) : tree(tree) {}
+  Tree& tree;
+  explicit InvariantTester(Tree& tree) : tree(tree) {}
 
   bool checkAllClausesAppear(std::vector<Clause*> expected) {
     std::vector<Clause*> actual;
-    tree.visitAllOps([&](const CodeTree::CodeOp* op, unsigned, bool) {
-      if (op->isSuccess()) { actual.push_back(op->getSuccessResult<Clause>()); }
+    tree.visitAllOps([&](const typename Tree::CodeOp* op, unsigned, bool) {
+      if (op->isSuccess()) { actual.push_back(op->template getSuccessResult<Clause>()); }
     });
     std::sort(actual.begin(), actual.end(), std::less<Clause*>{});
     std::sort(expected.begin(), expected.end(), std::less<Clause*>{});
@@ -195,14 +197,14 @@ struct InvariantTester {
   }
 
   bool checkNoConsecutiveNextOps() {
-    tree.visitAllOps([](const CodeTree::CodeOp* op, unsigned, bool) {
+    tree.visitAllOps([](const typename Tree::CodeOp* op, unsigned, bool) {
       if (op->isNext()) { ASS(!op[1].isNext()); }
     });
     return true;
   }
 
   bool checkILSDepths() {
-    tree.visitAllOps([](const CodeTree::CodeOp* op, unsigned, bool) {
+    tree.visitAllOps([](const typename Tree::CodeOp* op, unsigned, bool) {
       if (op->isLitEnd()) {
         auto ils = op->getILS();
         ASS_EQ(ils->depth, ils->previous ? ils->previous->depth + 1 : 0);
@@ -225,6 +227,7 @@ public:
   ClauseCodeTree* getClauseCodeTree() { return &_ct; }
 
   Ablation::Master::ClauseCodeTree* getMasterTree() { return &_ctMaster; }
+  Ablation::Ordered::ClauseCodeTree* getOrderedTree() { return &_ctOrdered; }
 
 protected:
   void handleClause(Clause* c, bool adding) override {
@@ -233,11 +236,13 @@ protected:
     if(adding) {
       _ct.insert(c);
       _ctMaster.insert(c);
+      _ctOrdered.insert(c);
       _trackedClauses.push_back(c);
     }
     else {
       _ct.remove(c);
       _ctMaster.remove(c);
+      _ctOrdered.remove(c);
       auto it = std::find(_trackedClauses.begin(), _trackedClauses.end(), c);
       ASS(it != _trackedClauses.end());
       _trackedClauses.erase(it);
@@ -247,10 +252,16 @@ protected:
     ASS(tester.checkAllClausesAppear(_trackedClauses));
     ASS(tester.checkNoConsecutiveNextOps());
     ASS(tester.checkILSDepths());
+
+    InvariantTester orderedTester(_ctOrdered);
+    ASS(orderedTester.checkAllClausesAppear(_trackedClauses));
+    ASS(orderedTester.checkNoConsecutiveNextOps());
+    ASS(orderedTester.checkILSDepths());
   }
 private:
   ClauseCodeTree _ct;
   Ablation::Master::ClauseCodeTree _ctMaster;
+  Ablation::Ordered::ClauseCodeTree _ctOrdered;
   std::vector<Clause*> _trackedClauses;
 };
 

@@ -184,6 +184,10 @@ set(SOURCES
     Indexing/master/ClauseCodeTree.hpp
     Indexing/master/CodeTree.cpp
     Indexing/master/CodeTree.hpp
+    Indexing/ordered/ClauseCodeTree.cpp
+    Indexing/ordered/ClauseCodeTree.hpp
+    Indexing/ordered/CodeTree.cpp
+    Indexing/ordered/CodeTree.hpp
     Indexing/DemodulationIndex.hpp
     Indexing/DemodulationIndex.cpp
     Indexing/Index.cpp
