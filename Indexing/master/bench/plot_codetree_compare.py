@@ -140,10 +140,10 @@ def main(csv_path, pdf_path):
         0.01, 0.01,
         f"One data point per problem: {n} of {n_all} TPTP problems where both code trees were queried"
         + (f" ({sum(n_excl.values())} ignored: " + ", ".join(f"{v} {k}" for k, v in sorted(n_excl.items())) + ")" if n_excl else "")
-        + ". Box: quartiles, line: median, diamond: mean, whiskers: 1.5×IQR (outliers not drawn).",
+        + ".\nBox: quartiles, line: median, diamond: mean, whiskers: 1.5×IQR (outliers not drawn).",
         fontsize=7.5, color=INK_2, ha="left", va="bottom",
     )
-    fig.tight_layout(rect=(0, 0.04, 1, 0.94))
+    fig.tight_layout(rect=(0, 0.07, 1, 0.94))
     fig.savefig(pdf_path, facecolor=SURFACE)
     print(f"wrote {pdf_path}; ignored problems: {n_excl or 'none'}")
     summary("avg time per call", cur_t, mas_t, "time")

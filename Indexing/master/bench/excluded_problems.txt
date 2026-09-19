@@ -1,0 +1,5 @@
+# Problems that are ignored by extract_csv.py / plot_codetree_compare.py (they stay in the CSV,
+# with the reason in the column `excluded`). One problem name per line, '#' starts a comment.
+# See ../investigation-large-queries.md for the reasons.
+SYO599+1    # ~1500-literal queries: the current tree explores the whole non-opposite search space first
+GRA045^1    # a query on which matchGlobalVars takes ~50 s in both trees (whichever runs first hangs)

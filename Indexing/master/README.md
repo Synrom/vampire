@@ -61,7 +61,9 @@ instruction count.
 See [`bench/README.md`](bench/README.md) (BenchExec setup, one CSV row per problem, PDF with box
 plots; first configuration: 60 s time limit).
 
-## TPTP results, configuration `t60` (60 s per problem, `-sa discount`)
+## TPTP results, sweep 1: current first (configuration `t60`, 60 s per problem, `-sa discount`)
+
+**Note:** this sweep used the wrong TPTP axioms (see "Correction for sweep 1" below); prefer sweep 2.
 
 All 26 990 problems of TPTP v9.3.0, run 2026-09-18/19, release build. Raw data:
 `~/codetree-compare/t60/` (`codetree_compare.csv`: one row per problem, `codetree_compare.pdf`:
@@ -120,6 +122,58 @@ Per problem (each problem counts once), current / master:
   `SEU`, `SET`, `NLP` (0.94-0.97x).
 * Time is worse than instructions suggest (1.024 vs. 1.006); part of this may be the fixed call
   order (current runs first, see Caveats).
+
+## TPTP results, sweep 2: master first (configuration `t60`)
+
+Same setup as sweep 1 but **master runs first** in every query, the clean `TPTP_DIR` handling,
+and the automatic exclusion of hanging final queries. Run 2026-09-19/20, all 26 990 problems of
+TPTP v9.3.0. Raw data: `~/codetree-compare-master-first/t60/` (`codetree_compare.csv`,
+`codetree_compare.pdf`, `codetree_compare_excluded.csv`, `results/`).
+
+* Statuses: 12 518 proved, 1 090 disproved, 12 359 timeouts, 716 input errors, 304 incomplete,
+  3 out of memory. No run crashed; the "current NULL, master not NULL" abort never fired.
+* **Ignored problems (9):** the 2 listed ones (`SYO599+1`, `GRA045^1`) and 7 found automatically as
+  `final-query-hang`: `GRA047^1`, `GRA049^1`, `GRA051^1`, `GRA053^1`, `GRA056^1`, `GRA058^1`,
+  `GRA066^1`, each with master (first in the order) still running a query for 15-55 s when the
+  time limit hit. This confirms that the `GRA*^1` outliers of sweep 1 were the same artifact.
+  (`GRA045^1` was in flight in the *current* tree for 678 ms this time: master finished its ~50 s
+  query just before the limit, so the 1 s rule did not fire; it is ignored because it is listed.
+  A scan for such missed cases -- call counts differing by <= 1, time ratio > 5, > 5 s -- found none.)
+* Call counts: 16 947 344 815 (current) vs. 16 947 347 578 (master), never more than 1 apart per problem.
+
+**Outcomes** (16.95 G queries, rows current, columns master):
+
+| current \ master | nothing | subsumption | subsumption resolution |
+|---|---|---|---|
+| **nothing**                | 12 613 511 099 | 0 | 0 |
+| **subsumption**            | 0 | 3 144 050 747 | 518 867 |
+| **subsumption resolution** | 0 | 1 019 | 1 189 515 815 |
+
+**Cost, current / master**, on the same 25 146 problems (the 9 ignored ones removed from both sweeps):
+
+| | sweep 1: current first | sweep 2: master first |
+|---|---|---|
+| total time in `next` | 1.021 | **0.958** |
+| total instructions | 1.002 | 1.001 |
+| median problem, time | 1.000 | 0.934 |
+| median problem, instructions | 0.962 | 0.964 |
+| current needs fewer instructions in | 72.7 % of the problems | 71.3 % |
+| current faster in | 37.9 % | 74.0 % |
+| problems > 2x worse / > 2x better (instructions) | 64 / 0 | 62 / 0 |
+
+* **The execution order changes the time ratio by ~6 points** (1.021 vs. 0.958): whichever tree
+  runs first is ~2-4 % slower. Instructions do not depend on the order. Averaged over both orders the
+  time ratio is ~0.99, i.e. **no significant time difference**; in instructions the current tree is
+  ~4 % cheaper for the typical problem but equal in total (+0.1-0.2 %).
+* The remaining tail is the same in both sweeps: `SYO583+1` (3.5x), `SYO584+1`, `SYO585+1`,
+  `SYO601+1`, `DAT128^1`, `ITP292^1/^3` (2.0-2.3x). They are probably the same large-query effect as
+  `SYO599+1` (not checked individually).
+
+**Correction for sweep 1.** It was started through `run_benchmark.sh` while the shell's `$TPTP`
+pointed to the system-wide TPTP v9.2.1, so Vampire read axioms from v9.2.1 (the problems themselves
+were from v9.3.0). Consequence: 77 problems ended in `ERROR (4)` ("cannot open file .../Axioms/....ax",
+e.g. `MGT068+1`) which run fine in sweep 2, and further problems may have used slightly different
+axiom files. The numbers of the two sweeps agree closely, but sweep 2 is the clean one.
 
 ## First run: `condensed_detachment_4.p`, `-sa discount`, `-t 90`
 
