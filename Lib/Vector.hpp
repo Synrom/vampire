@@ -26,6 +26,10 @@
 namespace Indexing {
   class CodeTree;
   class ClauseCodeTree;
+  namespace Master {
+    class CodeTree;
+    class ClauseCodeTree;
+  }
 }
 
 namespace Lib {
@@ -118,6 +122,8 @@ public:
 
   friend class Indexing::CodeTree;
   friend class Indexing::ClauseCodeTree;
+  friend class Indexing::Master::CodeTree;
+  friend class Indexing::Master::ClauseCodeTree;
 
   /**
    * Iterator that deallocates the vector when it yields the last value.

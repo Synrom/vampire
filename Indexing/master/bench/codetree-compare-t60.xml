@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<!DOCTYPE benchmark PUBLIC "+//IDN sosy-lab.org//DTD BenchExec benchmark 1.18//EN" "https://www.sosy-lab.org/benchexec/benchmark-1.18.dtd">
+<!--
+  Configuration "t60": 60 s time limit per problem.
+
+  Runs the instrumented Vampire (current + master code tree side by side, see ../README.md)
+  once on every problem of the task set. The comparison is *within* each run, so there is
+  only a single run definition.
+-->
+<benchmark
+    tool="vampire"
+    memlimit="8 GB"
+    timelimit="90 s"
+    cpuCores="1">
+
+<!-- Vampire's own limit (-t) fires first and makes it print its statistics and time trace;
+     the benchexec timelimit above is only a safety net for runs that hang. -->
+<option name="--input_syntax">tptp</option>
+<option name="-sa">discount</option>
+<option name="-t">60</option>
+<option name="-p">off</option>
+<option name="--time_statistics">on</option>
+<option name="--statistics">full</option>
+
+<rundefinition name="codetree-compare"/>
+
+<tasks>
+    <includesfile>TASKSET</includesfile>
+</tasks>
+
+<columns>
+    <column title="szs-status">szs-status</column>
+    <column title="instruction-count">instruction-count</column>
+</columns>
+
+</benchmark>

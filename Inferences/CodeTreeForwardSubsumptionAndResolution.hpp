@@ -23,6 +23,14 @@
 
 namespace Inferences {
 
+/**
+ * Which code tree is running a query right now (0: none, 1: current, 2: master), and for how
+ * long (in ns). Statistics uses this to report a query that is still running when Vampire
+ * is terminated (e.g. by the time limit), so that such a "hanging" last query can be recognized.
+ * Safe to call from another thread.
+ */
+void codeTreeQueryInFlight(unsigned& tree, unsigned long long& elapsedNs);
+
 class CodeTreeForwardSubsumptionAndResolution
   : public ForwardSimplificationEngine
 {
@@ -42,6 +50,7 @@ private:
   const bool _subsumptionResolution;
   std::shared_ptr<Indexing::CodeTreeSubsumptionIndex> _index;
   Indexing::ClauseCodeTree* _ct;
+  Indexing::Master::ClauseCodeTree* _masterCt;
 #if VDEBUG
   SATSubsumption::SATSubsumptionAndResolution satSubs;
 #endif

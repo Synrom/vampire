@@ -238,6 +238,8 @@ VI_OBJ = Indexing/AcyclicityIndex.o\
          Indexing/InductionFormulaIndex.o\
          Indexing/LiteralIndex.o\
          Indexing/LiteralMiniIndex.o\
+         Indexing/master/ClauseCodeTree.o\
+         Indexing/master/CodeTree.o\
          Indexing/ResultSubstitution.o\
          Indexing/TermIndex.o\
          Indexing/TermSharing.o\

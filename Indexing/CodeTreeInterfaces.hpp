@@ -22,6 +22,7 @@
 #include "LiteralCodeTree.hpp"
 #include "TermCodeTree.hpp"
 #include "ClauseCodeTree.hpp"
+#include "master/ClauseCodeTree.hpp"
 
 #include "Index.hpp"
 
@@ -175,19 +176,24 @@ class CodeTreeSubsumptionIndex
 public:
   CodeTreeSubsumptionIndex(SaturationAlgorithm&) {}
   ClauseCodeTree* getClauseCodeTree() { return &_ct; }
+  /** the same clauses, indexed by the master implementation (for comparing the two) */
+  Master::ClauseCodeTree* getMasterClauseCodeTree() { return &_masterCt; }
 protected:
   void handleClause(Clause* c, bool adding) override {
     TIME_TRACE("codetree subsumption index maintenance");
 
     if(adding) {
       _ct.insert(c);
+      _masterCt.insert(c);
     }
     else {
       _ct.remove(c);
+      _masterCt.remove(c);
     }
   }
 private:
   ClauseCodeTree _ct;
+  Master::ClauseCodeTree _masterCt;
 };
 
 };

@@ -167,6 +167,12 @@ public:
   unsigned equationalTautologies = 0;
   /** number of forward subsumed clauses */
   unsigned forwardSubsumed = 0;
+  /**
+   * Comparison of the current code tree against the master code tree in
+   * CodeTreeForwardSubsumptionAndResolution: codeTreeComparison[current][master], where the
+   * outcome is 0 = nothing found, 1 = subsumption, 2 = subsumption resolution.
+   */
+  unsigned codeTreeComparison[3][3] = {};
   /** number of backward subsumed clauses */
   unsigned backwardSubsumed = 0;
   /** number of forward ground joinable clauses */

@@ -26,6 +26,7 @@
 #include "Shell/UIHelper.hpp"
 
 #include "Saturation/SaturationAlgorithm.hpp"
+#include "Inferences/CodeTreeForwardSubsumptionAndResolution.hpp"
 
 #include "Options.hpp"
 #include "Statistics.hpp"
@@ -222,6 +223,22 @@ void Statistics::print(std::ostream& out)
     ENTRY("Fw subsumption demodulations to eq. taut.", forwardSubsumptionDemodulationsToEqTaut);
     ENTRY("Bw subsumption demodulations to eq. taut.", backwardSubsumptionDemodulationsToEqTaut);
     ENTRY("Inner rewrites to eq. taut.", innerRewritesToEqTaut);
+
+    GROUP("CODE TREE COMPARISON (current vs. master)");
+    {
+      static const char* outcomes[] = { "nothing", "subsumption", "subsumption resolution" };
+      for (unsigned c = 0; c < 3; c++) {
+        for (unsigned m = 0; m < 3; m++) {
+          groups.top().addEntry(string("current: ") + outcomes[c] + " / master: " + outcomes[m], codeTreeComparison[c][m]);
+        }
+      }
+      // a query that is still running at termination (e.g. hit by the time limit)
+      unsigned tree;
+      unsigned long long ns;
+      Inferences::codeTreeQueryInFlight(tree, ns);
+      groups.top().addEntry("in-flight query at termination: tree (0 none, 1 current, 2 master)", tree);
+      groups.top().addEntry("in-flight query at termination: running for [ms]", (unsigned)(ns / 1000000));
+    }
 
     GROUP("INDUCTION");
     ENTRY("MaxInductionDepth",maxInductionDepth);

@@ -1,0 +1,261 @@
+% Running in auto input_syntax mode. Trying TPTP
+% Refutation found. Thanks to Tanya!
+% SZS status Unsatisfiable for condensed_detachment_4
+% SZS output start Proof for condensed_detachment_4
+1. ~p(i(X1,X0)) | ~p(X1) | p(X0) [input(assumption)]
+2. ~p(i(i(i(a,i(b,c)),c),i(b,a))) [input(assumption)]
+3. p(i(X0,i(i(X1,i(X2,X0)),i(X2,X1)))) [input(assumption)]
+4. p(i(i(X1,i(X2,X0)),i(X2,X1))) | ~p(X0) [resolution 3,1]
+5. ~p(i(X1,i(X2,X0))) | ~p(X0) | p(i(X2,X1)) [resolution 4,1]
+6. p(i(i(X1,i(X0,X2)),X2)) | ~p(i(X0,X1)) [resolution 5,3]
+7. p(i(X1,i(X0,i(X1,X2)))) | ~p(X0) | ~p(X2) [resolution 5,4]
+8. ~p(i(X1,i(X0,X2))) | ~p(i(X0,X1)) | p(X2) [resolution 6,1]
+9. p(i(X3,i(X1,i(X0,i(X3,X2))))) | ~p(X2) | ~p(i(X0,X1)) [resolution 6,5]
+10. ~p(i(X2,X1)) | ~p(X1) | ~p(X0) | p(i(X0,X2)) [resolution 7,5]
+11. p(i(X0,i(X2,X1))) | ~p(X1) | ~p(X2) | ~p(X0) [resolution 7,1]
+12. ~p(i(i(X0,i(X1,X2)),X2)) | p(i(X1,X0)) [resolution 8,3]
+14. ~p(i(X0,i(X1,i(X0,X2)))) | p(X1) | ~p(X2) [resolution 8,4]
+15. ~p(i(X0,i(X1,i(X2,i(X0,X3))))) | p(X3) | ~p(i(X2,X1)) [resolution 8,6]
+18. p(i(X2,i(X1,i(X0,X3)))) | ~p(X2) | ~p(i(X0,X1)) | ~p(X3) [resolution 10,4]
+22. ~p(X0) | ~p(X1) | ~p(X2) | ~p(i(X1,X0)) | ~p(X3) | p(i(X3,X2)) [resolution 11,10]
+41. 4 <=> ! [X2] : ~p(X2) [avatar definition]
+42. ~p(X2) <- (4) [avatar component clause 41]
+44. 5 <=> ! [X0,X1] : (~p(X0) | ~p(X1) | p(i(X1,X0))) [avatar definition]
+45. p(i(X1,X0)) | ~p(X1) | ~p(X0) <- (5) [avatar component clause 44]
+47. ~p(X1) | ~p(X2) | ~p(i(X1,X0)) | ~p(X3) | p(i(X3,X2)) [forward subsumption resolution 22,1]
+50. 6 <=> ! [X0,X1] : (~p(X1) | ~p(i(X1,X0))) [avatar definition]
+51. ~p(i(X1,X0)) | ~p(X1) <- (6) [avatar component clause 50]
+52. 5 | 6 [avatar split clause 47,50,44]
+53. ~p(i(X2,X3)) | ~p(i(X1,X2)) | ~p(X0) | p(i(X1,i(X3,X0))) [resolution 9,8]
+54. ~p(i(X1,i(X3,X0))) | ~p(i(X1,X2)) | ~p(X0) | p(i(X2,X3)) [resolution 9,5]
+83. $false <- (4) [resolution 42,3]
+90. ~4 [avatar contradiction clause 83]
+91. p(i(X0,i(X1,X1))) | ~p(X0) [resolution 14,3]
+102. ~p(X0) | ~p(X0) | p(i(X1,X1)) [resolution 91,1]
+103. ~p(i(X0,i(X1,i(X2,X2)))) | p(i(X1,X0)) [resolution 91,12]
+104. ~p(X0) | p(i(X1,X1)) [duplicate literal removal 102]
+107. 8 <=> ! [X1] : p(i(X1,X1)) [avatar definition]
+108. p(i(X1,X1)) <- (8) [avatar component clause 107]
+109. 8 | 4 [avatar split clause 104,41,107]
+114. ~p(i(X1,i(i(X2,X0),i(X1,X2)))) | p(X0) [resolution 15,3]
+125. p(i(X1,i(X1,X0))) | ~p(X0) <- (8) [resolution 108,5]
+176. ~p(i(X0,i(X1,i(X2,i(X3,X4))))) | ~p(i(X3,X2)) | ~p(X4) | p(i(X1,X0)) [resolution 18,12]
+220. p(i(X0,i(i(i(X3,i(X4,X1)),i(X4,X3)),X2))) | ~p(X2) | ~p(i(X0,X1)) [resolution 53,3]
+234. ~p(i(X0,X1)) | ~p(X2) | p(i(X1,X0)) | ~p(X2) <- (8) [resolution 54,125]
+240. ~p(i(X0,X1)) | ~p(X2) | p(i(X1,X0)) <- (8) [duplicate literal removal 234]
+243. 13 <=> ! [X0,X1] : (~p(i(X0,X1)) | p(i(X1,X0))) [avatar definition]
+244. ~p(i(X0,X1)) | p(i(X1,X0)) <- (13) [avatar component clause 243]
+245. 4 | 13 | ~8 [avatar split clause 240,107,243,41]
+288. ~p(X0) | ~p(X1) | ~p(X2) <- (6) [resolution 51,7]
+304. 15 <=> ! [X2,X1] : ~p(i(X1,X2)) [avatar definition]
+305. ~p(i(X1,X2)) <- (15) [avatar component clause 304]
+312. 4 | 4 | 4 | ~6 [avatar split clause 288,50,41,41,41]
+346. p(i(i(i(X0,i(X1,X2)),i(X1,X0)),X2)) <- (13) [resolution 244,3]
+463. ~p(i(i(X2,X0),i(X1,X2))) | ~p(X1) | p(X0) <- (5) [resolution 114,45]
+549. p(i(i(X0,i(X0,X1)),X1)) [resolution 103,3]
+1309. ~p(i(X0,i(X1,i(i(X1,X0),X2)))) | p(X2) <- (5) [resolution 463,3]
+1321. p(i(X1,i(X0,X2))) | ~p(X0) | ~p(i(X1,X2)) <- (5) [resolution 463,6]
+2284. $false <- (15) [resolution 305,549]
+2312. ~15 [avatar contradiction clause 2284]
+2345. ~p(i(X0,i(X1,X2))) | ~p(i(X3,X4)) | ~p(i(X1,X0)) | ~p(X2) | p(i(i(i(X5,i(X6,X4)),i(X6,X5)),X3)) [resolution 220,176]
+2397. ~p(i(X0,i(X1,X2))) | ~p(i(X3,X4)) | ~p(X2) | p(i(i(i(X5,i(X6,X4)),i(X6,X5)),X3)) [forward subsumption resolution 2345,5]
+2423. 74 <=> ! [X4,X3,X2,X1] : (~p(i(X1,X2)) | p(i(i(i(X3,i(X4,X2)),i(X4,X3)),X1))) [avatar definition]
+2424. p(i(i(i(X3,i(X4,X2)),i(X4,X3)),X1)) | ~p(i(X1,X2)) <- (74) [avatar component clause 2423]
+2429. 75 <=> ! [X2,X0,X1] : (~p(i(X0,i(X1,X2))) | ~p(X2)) [avatar definition]
+2430. ~p(i(X0,i(X1,X2))) | ~p(X2) <- (75) [avatar component clause 2429]
+2431. 74 | 75 [avatar split clause 2397,2429,2423]
+5164. ~p(i(X1,i(i(X0,X1),X2))) | ~p(X0) | p(X2) <- (5) [resolution 1321,1309]
+13376. p(i(X2,i(X0,i(X2,X1)))) | ~p(i(X0,X1)) <- (74) [resolution 2424,12]
+24392. ~p(i(i(X0,X1),X2)) | p(i(X1,X2)) | ~p(X0) <- (5, 74) [resolution 5164,13376]
+70223. ~p(i(X0,X1)) <- (75) [resolution 2430,3]
+70459. 15 | ~75 [avatar split clause 70223,2429,304]
+146645. ~p(i(X1,i(X0,X2))) | p(i(i(X0,X1),X2)) <- (5, 13, 74) [resolution 24392,346]
+508651. p(i(i(i(X0,i(X1,X2)),X2),i(X1,X0))) <- (5, 13, 74) [resolution 146645,3]
+837205. $false <- (5, 13, 74) [resolution 508651,2]
+838183. ~5 | ~13 | ~74 [avatar contradiction clause 837205]
+s4. 5 | 6 [sat_conversion 52]
+s6. ~4 [sat_conversion 90]
+s7. 4 | 8 [sat_conversion 109]
+s13. 4 | ~8 | 13 [sat_conversion 245]
+s27. 4 | 4 | 4 | ~6 [sat_conversion 312]
+s28. 4 | ~6 [rat s27]
+s166. ~15 [sat_conversion 2312]
+s199. 74 | 75 [sat_conversion 2431]
+s7113. 15 | ~75 [sat_conversion 70459]
+s97106. ~5 | ~13 | ~74 [sat_conversion 838183]
+s99037. ~75 [rat s7113,s166]
+s99191. 74 [rat s199,s99037]
+s102810. ~6 [rat s28,s6]
+s102815. 8 [rat s7,s6]
+s106766. 13 [rat s13,s6,s102815]
+s108935. ~5 [rat s97106,s99191,s106766]
+s109631. # [rat s4,s102810,s108935]
+838372. $false [avatar sat refutation s109631]
+% SZS output end Proof for condensed_detachment_4
+% ------------------------------
+% Version: Vampire 5.1.0 (Release build, commit 357f1538b on 2026-09-18 17:43:59 +0200)
+% CaDiCaL version: 2.1.3
+% Termination reason: Refutation
+% -----------------------------------------------------------------------------------
+% INPUT                                                            |  PROOF |  TOTAL
+% -----------------------------------------------------------------------------------
+% Assumption                                                       |      3 |      3
+% -----------------------------------------------------------------------------------
+% SIMPLIFYING INFERENCES                                           |  PROOF |  TOTAL
+% -----------------------------------------------------------------------------------
+% Duplicate literal removal                                        |      2 |  56178
+% Forward subsumption resolution                                   |      2 |  68362
+% -----------------------------------------------------------------------------------
+% GENERATING INFERENCES                                            |  PROOF |  TOTAL
+% -----------------------------------------------------------------------------------
+% Resolution                                                       |     39 | 580380
+% -----------------------------------------------------------------------------------
+% AVATAR                                                           |  PROOF |  TOTAL
+% -----------------------------------------------------------------------------------
+% Avatar definition                                                |      8 |  28618
+% Avatar component clause                                          |      8 |  14319
+% Avatar sat refutation                                            |      1 |      1
+% Avatar split clause                                              |      6 |  90469
+% Avatar contradiction clause                                      |      3 |     42
+% -----------------------------------------------------------------------------------
+% MISCELLANEOUS INFERENCES                                         |  PROOF |  TOTAL
+% -----------------------------------------------------------------------------------
+% Avatar definition                                                |      8 |  28618
+% Avatar component clause                                          |      8 |  14319
+% Avatar sat refutation                                            |      1 |      1
+% Avatar split clause                                              |      6 |  90469
+% Avatar contradiction clause                                      |      3 |     42
+% -----------------------------------------------------------------------------------
+% CLAUSES/FORMULAS                                                 |  PROOF |  TOTAL
+% -----------------------------------------------------------------------------------
+% Input clauses                                                    |      3 |      3
+% Clauses                                                          |     55 | 733552
+% Formulas                                                         |     17 | 104820
+% -----------------------------------------------------------------------------------
+% SATURATION                                                       |           TOTAL
+% -----------------------------------------------------------------------------------
+% Initial clauses                                                  |               3
+% Activations started                                              |            3679
+% Active clauses                                                   |            1809
+% Passive clauses                                                  |          300716
+% Final active clauses                                             |            1800
+% Final passive clauses                                            |          296858
+% -----------------------------------------------------------------------------------
+% SIMPLIFYING INFERENCES                                           |           TOTAL
+% -----------------------------------------------------------------------------------
+% Duplicate literals                                               |           61692
+% -----------------------------------------------------------------------------------
+% DELETION INFERENCES                                              |           TOTAL
+% -----------------------------------------------------------------------------------
+% Simple tautologies                                               |           18021
+% Forward subsumptions                                             |          184575
+% -----------------------------------------------------------------------------------
+% CODE TREE COMPARISON (current vs. master)                        |           TOTAL
+% -----------------------------------------------------------------------------------
+% current: nothing / master: nothing                               |          395568
+% current: nothing / master: subsumption                           |               0
+% current: nothing / master: subsumption resolution                |               0
+% current: subsumption / master: nothing                           |               0
+% current: subsumption / master: subsumption                       |          183995
+% current: subsumption / master: subsumption resolution            |             580
+% current: subsumption resolution / master: nothing                |               0
+% current: subsumption resolution / master: subsumption            |               2
+% current: subsumption resolution / master: subsumption resolution |           68360
+% -----------------------------------------------------------------------------------
+% AVATAR                                                           |           TOTAL
+% -----------------------------------------------------------------------------------
+% Split clauses                                                    |           43725
+% Split components                                                 |           94345
+% Sat splitting refutations                                        |              42
+% -----------------------------------------------------------------------------------
+% SAT SOLVER                                                       |           TOTAL
+% -----------------------------------------------------------------------------------
+% SAT solver clauses                                               |          109631
+% SAT solver unit clauses                                          |           13142
+% SAT solver binary clauses                                        |           11811
+% -----------------------------------------------------------------------------------
+% Time elapsed: 51.027 s
+% Peak memory usage: 283 MB
+% Instructions burned: 206222 (million)
+% ------------------------------
+% ------------------------------
+===== start of time trace =====
+[root] (total: 51 s, avg: 51 s, cnt: 1, instr: 216239864563)
+  ├──[99%] main loop (total: 50 s, avg: 50 s, cnt: 1, instr: 216198629880)
+  │    ├──[99%] run (total: 50 s, avg: 50 s, cnt: 1, instr: 216198624811)
+  │    │    ├──[92%] forward simplification (total: 47 s, avg: 72 μs, cnt: 648509, instr: 201893887189)
+  │    │    │    ├──[94%] codetree forward subsumption (total: 44 s, avg: 68 μs, cnt: 648509, instr: 190769798359)
+  │    │    │    │    ├──[50%] ClauseCodeTree::ClauseMatcher::next (current) (total: 22 s, avg: 34 μs, cnt: 648505, instr: 97383246274)
+  │    │    │    │    ├──[47%] ClauseCodeTree::ClauseMatcher::next (master) (total: 21 s, avg: 32 μs, cnt: 648505, instr: 89355579374)
+  │    │    │    │    └──[ 0%] term sharing (total: 15 ms, avg: 120 ns, cnt: 127819, instr: 23303769)
+  │    │    │    └──[ 5%] splitting (total: 2435 ms, avg: 6157 ns, cnt: 395572, instr: 10684326781)
+  │    │    │         ├──[19%] splitting component index usage (total: 485 ms, avg: 1125 ns, cnt: 431545, instr: 1854713841)
+  │    │    │         │    └──[91%] hvci retrieve (total: 442 ms, avg: 1026 ns, cnt: 431545, instr: 1738739162)
+  │    │    │         │         └──[79%] hvci compute hash (total: 350 ms, avg: 812 ns, cnt: 431545, instr: 1505144683)
+  │    │    │         └──[ 0%] splitting component index maintenance (total: 15 ms, avg: 1064 ns, cnt: 14319, instr: 65892445)
+  │    │    │              └──[88%] hvci insert (total: 13 ms, avg: 944 ns, cnt: 14319, instr: 62421623)
+  │    │    │                   └──[78%] hvci compute hash (total: 10 ms, avg: 739 ns, cnt: 14319, instr: 56593195)
+  │    │    ├──[ 4%] activation (total: 2441 ms, avg: 1349 μs, cnt: 1809, instr: 9189609751)
+  │    │    │    ├──[90%] clause generation (total: 2203 ms, avg: 1892 ns, cnt: 1164378, instr: 8429273505)
+  │    │    │    │    └──[94%] resolution (total: 2081 ms, avg: 1790 ns, cnt: 1162569, instr: 8079713924)
+  │    │    │    │         └──[ 1%] term sharing (total: 34 ms, avg: 101 ns, cnt: 336046, instr: 91986995)
+  │    │    │    ├──[ 1%] add clause (total: 28 ms, avg: 15 μs, cnt: 1809, instr: 68680521)
+  │    │    │    │    ├──[73%] codetree subsumption index maintenance (total: 20 ms, avg: 11 μs, cnt: 1809, instr: 56325876)
+  │    │    │    │    └──[22%] binary resolution index maintenance (total: 6467 μs, avg: 3575 ns, cnt: 1809, instr: 10961550)
+  │    │    │    │         └──[ 0%] term sharing (total: 22 μs, avg: 199 ns, cnt: 111, instr: 34009)
+  │    │    │    ├──[ 0%] clause selection (total: 3923 μs, avg: 2168 ns, cnt: 1809, instr: 7157910)
+  │    │    │    │    └──[95%] literal selection (total: 3741 μs, avg: 2068 ns, cnt: 1809, instr: 6722601)
+  │    │    │    └──[ 0%] redundancy check (total: 112 μs, avg: 62 ns, cnt: 1809, instr: 213417)
+  │    │    ├──[ 0%] passive container maintenance (total: 464 ms, avg: 1525 ns, cnt: 304395, instr: 1158470701)
+  │    │    ├──[ 0%] immediate simplification (total: 294 ms, avg: 409 ns, cnt: 719071, instr: 1064374602)
+  │    │    ├──[ 0%] minimizing solver time (total: 101 ms, avg: 43 μs, cnt: 2323, instr: 700595503)
+  │    │    ├──[ 0%] SAT solver (total: 33 ms, avg: 14 μs, cnt: 2324, instr: 255856831)
+  │    │    ├──[ 0%] splitting model update (total: 1303 μs, avg: 560 ns, cnt: 2323, instr: 2731995)
+  │    │    │    ├──[10%] passive container maintenance (total: 133 μs, avg: 745 ns, cnt: 179, instr: 390493)
+  │    │    │    ├──[ 3%] codetree subsumption index maintenance (total: 50 μs, avg: 5595 ns, cnt: 9, instr: 40577)
+  │    │    │    └──[ 1%] binary resolution index maintenance (total: 22 μs, avg: 2502 ns, cnt: 9, instr: 26281)
+  │    │    └──[ 0%] backward simplification (total: 127 μs, avg: 70 ns, cnt: 1809, instr: 213200)
+  │    └──[ 0%] init (total: 37 μs, avg: 37 μs, cnt: 1, instr: 3446)
+  ├──[ 0%] parsing (total: 264 μs, avg: 264 μs, cnt: 1, instr: 251319)
+  │    └──[ 2%] term sharing (total: 7640 ns, avg: 347 ns, cnt: 22, instr: 19175)
+  ├──[ 0%] property evaluation (total: 25 μs, avg: 25 μs, cnt: 1, instr: 24259)
+  └──[ 0%] preprocessing (total: 15 μs, avg: 15 μs, cnt: 1, instr: 13243)
+       └──[42%] unused predicate definition removal (total: 6471 ns, avg: 6471 ns, cnt: 1, instr: 2012)
+===== end of time trace =====
+
+===== start of flattened time profile =====
+[root] (total:   51 s, avg:   51 s, cnt:      1, instr: 216239864563)
+  ├──[99%] main loop                                     (total:   50 s, avg:   50 s, cnt:      1, instr: 216198629880)
+  ├──[99%] run                                           (total:   50 s, avg:   50 s, cnt:      1, instr: 216198624811)
+  ├──[92%] forward simplification                        (total:   47 s, avg:   72 μs, cnt: 648509, instr: 201893887189)
+  ├──[87%] codetree forward subsumption                  (total:   44 s, avg:   68 μs, cnt: 648509, instr: 190769798359)
+  ├──[44%] ClauseCodeTree::ClauseMatcher::next (current) (total:   22 s, avg:   34 μs, cnt: 648505, instr:  97383246274)
+  ├──[41%] ClauseCodeTree::ClauseMatcher::next (master)  (total:   21 s, avg:   32 μs, cnt: 648505, instr:  89355579374)
+  ├──[ 4%] activation                                    (total: 2441 ms, avg: 1349 μs, cnt:   1809, instr:   9189609751)
+  ├──[ 4%] splitting                                     (total: 2435 ms, avg: 6157 ns, cnt: 395572, instr:  10684326781)
+  ├──[ 4%] clause generation                             (total: 2203 ms, avg: 1892 ns, cnt: 1164378, instr:   8429273505)
+  ├──[ 4%] resolution                                    (total: 2081 ms, avg: 1790 ns, cnt: 1162569, instr:   8079713924)
+  ├──[ 0%] splitting component index usage               (total:  485 ms, avg: 1125 ns, cnt: 431545, instr:   1854713841)
+  ├──[ 0%] passive container maintenance                 (total:  464 ms, avg: 1524 ns, cnt: 304574, instr:   1158861194)
+  ├──[ 0%] hvci retrieve                                 (total:  442 ms, avg: 1026 ns, cnt: 431545, instr:   1738739162)
+  ├──[ 0%] hvci compute hash                             (total:  361 ms, avg:  809 ns, cnt: 445864, instr:   1561737878)
+  ├──[ 0%] immediate simplification                      (total:  294 ms, avg:  409 ns, cnt: 719071, instr:   1064374602)
+  ├──[ 0%] minimizing solver time                        (total:  101 ms, avg:   43 μs, cnt:   2323, instr:    700595503)
+  ├──[ 0%] term sharing                                  (total:   49 ms, avg:  106 ns, cnt: 463998, instr:    115343948)
+  ├──[ 0%] SAT solver                                    (total:   33 ms, avg:   14 μs, cnt:   2324, instr:    255856831)
+  ├──[ 0%] add clause                                    (total:   28 ms, avg:   15 μs, cnt:   1809, instr:     68680521)
+  ├──[ 0%] codetree subsumption index maintenance        (total:   20 ms, avg:   11 μs, cnt:   1818, instr:     56366453)
+  ├──[ 0%] splitting component index maintenance         (total:   15 ms, avg: 1064 ns, cnt:  14319, instr:     65892445)
+  ├──[ 0%] hvci insert                                   (total:   13 ms, avg:  944 ns, cnt:  14319, instr:     62421623)
+  ├──[ 0%] binary resolution index maintenance           (total: 6489 μs, avg: 3569 ns, cnt:   1818, instr:     10987831)
+  ├──[ 0%] clause selection                              (total: 3923 μs, avg: 2168 ns, cnt:   1809, instr:      7157910)
+  ├──[ 0%] literal selection                             (total: 3741 μs, avg: 2068 ns, cnt:   1809, instr:      6722601)
+  ├──[ 0%] splitting model update                        (total: 1303 μs, avg:  560 ns, cnt:   2323, instr:      2731995)
+  ├──[ 0%] parsing                                       (total:  264 μs, avg:  264 μs, cnt:      1, instr:       251319)
+  ├──[ 0%] backward simplification                       (total:  127 μs, avg:   70 ns, cnt:   1809, instr:       213200)
+  ├──[ 0%] redundancy check                              (total:  112 μs, avg:   62 ns, cnt:   1809, instr:       213417)
+  ├──[ 0%] init                                          (total:   37 μs, avg:   37 μs, cnt:      1, instr:         3446)
+  ├──[ 0%] property evaluation                           (total:   25 μs, avg:   25 μs, cnt:      1, instr:        24259)
+  ├──[ 0%] preprocessing                                 (total:   15 μs, avg:   15 μs, cnt:      1, instr:        13243)
+  └──[ 0%] unused predicate definition removal           (total: 6471 ns, avg: 6471 ns, cnt:      1, instr:         2012)
+===== end of flattened time profile =====
