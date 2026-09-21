@@ -529,6 +529,7 @@ bool CodeTree::SearchStruct::getTargetOpPtr(const CodeOp& insertedOp, CodeOp**& 
 
 // expose for ClauseCodeTree.cpp
 template bool CodeTree::SearchStruct::getTargetOpPtr<false>(const CodeOp&, CodeOp**&);
+template bool CodeTree::SearchStruct::getTargetOpPtr<true>(const CodeOp&, CodeOp**&);
 
 CodeTree::CodeOp* CodeTree::SearchStruct::getTargetOp(const FlatTerm::Entry* ftPos)
 {
@@ -1391,6 +1392,11 @@ void CodeTree::compressCheckOps(CodeOp* chainStart)
   op->setAlternative(0);
 }
 
+// Called from ClauseCodeTree.cpp: without explicit instantiations an optimized
+// build inlines every use inside this file and emits no out-of-line symbol.
+template void CodeTree::compressCheckOps<CodeTree::SearchStruct::FN_STRUCT>(CodeOp*);
+template void CodeTree::compressCheckOps<CodeTree::SearchStruct::GROUND_TERM_STRUCT>(CodeOp*);
+
 //////////// removal //////////////
 
 // Find the instruction in the block starting at first that references target
@@ -1473,7 +1479,6 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
 
     CodeOp firstOpCopy= *firstOp;
 
-    ILStruct* previous = nullptr;
     for (unsigned i = cb->length(); i-- > 0;) {
       if ((*cb)[i].isLitEnd()) {
         ILStruct* ils = (*cb)[i].getILS();
@@ -1483,7 +1488,6 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
           }
           return;
         }
-        previous = ils->previous;
         delete ils;
         (*cb)[i].makeFail();
       }
@@ -1563,7 +1567,7 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
         //there is an operation after the pointingOp that cannot be lost
         return;
       }
-      if(prevOp->isLitEnd() && (prevOp->getILS()!=previous || prevOp->getILS()->refCount)) {
+      if(prevOp->isLitEnd() && prevOp->getILS()->refCount) {
         return;
       }
       prevOp++;

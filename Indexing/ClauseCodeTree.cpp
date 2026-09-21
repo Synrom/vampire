@@ -121,7 +121,23 @@ ClauseCodeTree::InsertionPosition ClauseCodeTree::matchCode(
         }
         if (op->isSearchStruct()) {
           CodeOp** target;
-          if (op->getSearchStruct()->getTargetOpPtr<false>(code[i], target) && *target) {
+          if (compress) {
+            // Insertion: like CodeTree::incorporate, give a new function symbol its own
+            // SEARCH_STRUCT slot instead of chaining it behind a neighbouring target.
+            if (op->getSearchStruct()->getTargetOpPtr<true>(code[i], target)) {
+              if (!*target) {
+                if (i >= best.matchedPrefixLength) {
+                  best = {op, entry.block, entry.blockReference, i};
+                  best.slot = target;
+                }
+                goto next_entry;
+              }
+              op = *target;
+              entry.blockReference = target;
+              entry.block = firstOpToCodeBlock(op);
+              continue;
+            }
+          } else if (op->getSearchStruct()->getTargetOpPtr<false>(code[i], target) && *target) {
             op = *target;
             entry.blockReference = target;
             entry.block = firstOpToCodeBlock(op);
@@ -217,7 +233,7 @@ void ClauseCodeTree::incorporate(CodeStack& code)
       break;
     }
     if (matchedCnt != starts[lit+1]) {
-      tailTarget = &match.op->alternative();
+      tailTarget = match.slot ? match.slot : &match.op->alternative();
       break;
     }
     previous = match.op->getILS();
@@ -227,9 +243,23 @@ void ClauseCodeTree::incorporate(CodeStack& code)
   }
   if (lit == clen) {
     if (previous->hasSuccessor) {
-      CodeOp* op = last.op + 1;
+      // Walk the alternatives of the successor position like CodeTree::incorporate does
+      // (SUCCESS is the only op still to insert), so that long CHECK_FUN / CHECK_GROUND_TERM
+      // chains get compressed into SEARCH_STRUCTs here as well.
+      CodeOp* chainStart = last.op + 1;
+      CodeOp* op = chainStart;
+      unsigned funs = 0, grounds = 0;
       while (op->alternative()) {
         op = op->alternative();
+        if (op->isCheckFun() && ++funs > 5) {
+          compressCheckOps<SearchStruct::FN_STRUCT>(chainStart);
+          op = chainStart;
+          funs = grounds = 0;
+        } else if (op->isCheckGroundTerm() && ++grounds > 3) {
+          compressCheckOps<SearchStruct::GROUND_TERM_STRUCT>(chainStart);
+          op = chainStart;
+          funs = grounds = 0;
+        }
       }
       tailTarget = &op->alternative();
     } else {
@@ -247,7 +277,7 @@ void ClauseCodeTree::incorporate(CodeStack& code)
     ILStruct* split = nullptr;
     bool useNext = false;
     for (unsigned i = pos; i < code.length(); ++i) {
-      if (lit < clen && overlaps[lit] > nextThreshold && i == starts[lit] + overlaps[lit]) {
+      if (lit < clen && overlaps[lit] >= nextThreshold && i == starts[lit] + overlaps[lit]) {
         nextPosition = suffix.length();
         suffix.push(CodeOp::getNext(0));
         useNext = true;
@@ -307,7 +337,7 @@ void ClauseCodeTree::optimizeLiteralOrder(DArray<Literal*>& lits)
 {
   lits.sort(InitialLiteralOrderingComparator());
   unsigned clen=lits.size();
-  if (clen < 2) {
+  if (isEmpty() || clen < 2) {
     return;
   }
 
@@ -350,23 +380,6 @@ void ClauseCodeTree::optimizeLiteralOrder(DArray<Literal*>& lits)
     entries = std::move(nextEntries);
   }
 
-  // Beyond the shared clause prefix, favour overlaps that can produce NEXT.
-  static const unsigned int nextThreshold = 1;
-  for (; start + 1 < clen; start++) {
-    unsigned best = start + 1;
-    unsigned bestShared = sharedPrefix(codes[start].begin(), codes[best].begin());
-    for (unsigned i = best + 1; i < clen; ++i) {
-      unsigned shared = sharedPrefix(codes[start].begin(), codes[i].begin());
-      if (shared > bestShared && (!lits[best]->ground() || lits[i]->ground())) {
-        best = i;
-        bestShared = shared;
-      }
-    }
-    if (bestShared > nextThreshold) {
-      std::swap(lits[start+1], lits[best]);
-      std::swap(codes[start+1], codes[best]);
-    }
-  }
   for (auto& literal : codes) {
     delete literal.top().getILS();
   }

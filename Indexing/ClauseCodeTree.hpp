@@ -60,6 +60,8 @@ private:
     // shared prefix skipped on entry. A complete match includes LIT_END;
     // in that case op points to LIT_END rather than the following operation.
     unsigned matchedPrefixLength = 0;
+    // Empty SEARCH_STRUCT slot to fill instead of op->alternative(), if any.
+    CodeOp** slot = nullptr;
   };
 
   InsertionPosition matchCode(const CodeOp* code, unsigned length,
