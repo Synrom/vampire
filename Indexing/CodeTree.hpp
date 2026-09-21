@@ -43,28 +43,6 @@ public:
   struct SearchStruct;
   struct CodeOp;
 
-  /** Ablation-study op-count instrumentation: number of CodeOps executed
-   * (excluding NEXT ops) and number of NEXT ops executed, accumulated across
-   * a single top-level ClauseMatcher::next() call. Reset and read by the
-   * caller; incremented inside Matcher::execute(). */
-  static size_t executedOpsCount;
-  static size_t executedNextOpsCount;
-
-  /** Ablation-study checkpoint instrumentation, accumulated across a single
-   * top-level ClauseMatcher::next() call and reset/read by the caller.
-   * @b recordedCheckpointsCount is incremented once per executed NEXT op
-   * (Matcher::doNextOp()), @b usedCheckpointsCount once per checkpoint that
-   * is subsequently consumed to resume matching (Matcher::prepareLiteral()).
-   * Their ratio is the probability that a recorded checkpoint gets used. */
-  static size_t recordedCheckpointsCount;
-  static size_t usedCheckpointsCount;
-
-  /** Ablation-study overlap instrumentation: the overlap length (see
-   * ClauseCodeTree::incorporate() / CodeOp::getOverlapLen()) of every NEXT
-   * op executed during a single top-level ClauseMatcher::next() call. Reset
-   * and read by the caller; pushed to inside Matcher::doNextOp(). */
-  static Stack<unsigned> executedNextOverlapLens;
-
 protected:
   /**
   * During the destruction of the CodeTree,
@@ -245,12 +223,6 @@ public:
       return true;
     }
 
-    /** Ablation-study instrumentation: the shared-prefix ("overlap") length
-     * (see ClauseCodeTree::incorporate()) this NEXT op was compiled for.
-     * Meaningless for other instructions. */
-    inline unsigned getOverlapLen() const { ASS(isNext()); return _overlapLen; }
-    inline void setOverlapLen(unsigned len) { ASS(isNext()); _overlapLen = len; }
-
     inline Term* getTargetTerm() const
     {
       ASS(isCheckGroundTerm());
@@ -294,9 +266,6 @@ public:
      * a @b CodeBlock or to a @b landingOp of a @b SearchStruct.
      */
     CodeOp* _alternative = 0;
-
-    /** Ablation-study instrumentation; see @b getOverlapLen(). */
-    unsigned _overlapLen = 0;
   };
 
   /**

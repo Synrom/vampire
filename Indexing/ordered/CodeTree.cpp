@@ -59,12 +59,6 @@ using namespace std;
 using namespace Lib;
 using namespace Kernel;
 
-size_t CodeTree::executedOpsCount = 0;
-size_t CodeTree::executedNextOpsCount = 0;
-size_t CodeTree::recordedCheckpointsCount = 0;
-size_t CodeTree::usedCheckpointsCount = 0;
-Stack<unsigned> CodeTree::executedNextOverlapLens;
-
 //////////////// general datastructures ////////////////////
 
 CodeTree::LitInfo::LitInfo(Clause* cl, unsigned litIndex)
@@ -614,11 +608,6 @@ bool CodeTree::Matcher<removing, checkRange>::execute()
 
   bool shouldBacktrack=false;
   for(;;) {
-    if(op->_instruction()==NEXT) {
-      CodeTree::executedNextOpsCount++;
-    } else {
-      CodeTree::executedOpsCount++;
-    }
     if(op->alternative()) {
       if constexpr (removing) {
         btStack.push(BTPointRemoving(tp, op->alternative(), RemovingBase::firstsInBlocks->size()));
@@ -787,7 +776,6 @@ bool CodeTree::Matcher<removing, checkRange>::prepareLiteral()
 
   // Resume the next checkpoint
   if (const Checkpoint* cp = cpCursor.next(linfoCnt)) {
-    CodeTree::usedCheckpointsCount++;
     const auto& pool = cpCursor.source->cpBindingPool;
     ASS(bindings.size() >= cp->bindCnt);
     ASS(cp->bindOffset <= pool.size());
@@ -892,9 +880,6 @@ inline void CodeTree::Matcher<removing, checkRange>::doNextOp()
   ASS(!op->alternative())
   unsigned slot = op->_arg();
   ASS(slot < checkpointSlots.size());
-
-  CodeTree::recordedCheckpointsCount++;
-  CodeTree::executedNextOverlapLens.push(op->getOverlapLen());
 
   // store the bindings in the pool
   unsigned bindOffset = (unsigned)cpBindingPool.size();
@@ -1408,6 +1393,11 @@ void CodeTree::compressCheckOps(CodeOp* chainStart)
   }
   op->setAlternative(0);
 }
+
+// Called from ClauseCodeTree.cpp: without explicit instantiations an optimized
+// build inlines every use inside this file and emits no out-of-line symbol.
+template void CodeTree::compressCheckOps<CodeTree::SearchStruct::FN_STRUCT>(CodeOp*);
+template void CodeTree::compressCheckOps<CodeTree::SearchStruct::GROUND_TERM_STRUCT>(CodeOp*);
 
 //////////// removal //////////////
 

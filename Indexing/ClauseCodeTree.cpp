@@ -279,9 +279,7 @@ void ClauseCodeTree::incorporate(CodeStack& code)
     for (unsigned i = pos; i < code.length(); ++i) {
       if (lit < clen && overlaps[lit] >= nextThreshold && i == starts[lit] + overlaps[lit]) {
         nextPosition = suffix.length();
-        CodeOp nextOp = CodeOp::getNext(0);
-        nextOp.setOverlapLen(overlaps[lit]);
-        suffix.push(nextOp);
+        suffix.push(CodeOp::getNext(0));
         useNext = true;
       }
       suffix.push(code[i]);
@@ -791,25 +789,6 @@ void ClauseCodeTree::ClauseMatcher::reset()
 Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
 {
   TIME_TRACE("Clause Matcher next current")
-  CodeTree::executedOpsCount = 0;
-  CodeTree::executedNextOpsCount = 0;
-  CodeTree::recordedCheckpointsCount = 0;
-  CodeTree::usedCheckpointsCount = 0;
-  CodeTree::executedNextOverlapLens.reset();
-  struct RecordOpCounts {
-    ~RecordOpCounts() {
-      RSTAT_CTR_INC_MANY("executed code ops current", CodeTree::executedOpsCount);
-      RSTAT_CTR_INC_MANY("executed next ops current", CodeTree::executedNextOpsCount);
-      RSTAT_CTR_INC_MANY("executed code ops incl next current",
-          CodeTree::executedOpsCount + CodeTree::executedNextOpsCount);
-      RSTAT_CTR_INC("clause matcher calls current");
-      RSTAT_CTR_INC_MANY("NEXT checkpoints recorded", CodeTree::recordedCheckpointsCount);
-      RSTAT_CTR_INC_MANY("NEXT checkpoints used", CodeTree::usedCheckpointsCount);
-      for (unsigned len : CodeTree::executedNextOverlapLens) {
-        RSTAT_MCTR_INC("NEXT overlap length", len);
-      }
-    }
-  } recordOpCounts;
   if(lms.isEmpty()) {
     return 0;
   }

@@ -34,7 +34,7 @@ CodeTreeForwardSubsumptionAndResolution::CodeTreeForwardSubsumptionAndResolution
  * against the current implementation, with every approach's
  * ClauseMatcher::next called exactly once per
  * CodeTreeForwardSubsumptionAndResolution::perform call - never drained -
- * so op-count and timing measurements stay comparable across approaches.
+ * so timing measurements stay comparable across approaches.
  */
 template<class Tree>
 static bool ablationCallMatcherOnce(Tree* tree, Clause* cl, bool subsumptionResolution)
@@ -58,7 +58,7 @@ bool CodeTreeForwardSubsumptionAndResolution::perform(Clause *cl, Clause *&repla
 
   // Ablation study: call every OTHER approach's matcher exactly once over
   // the same query clause, purely for timing (each ClauseMatcher::next has
-  // its own named TIME_TRACE) and for the cross-approach invariant checked
+  // its own named TIME_TRACE) and for the cross-approach invariants checked
   // below. The current implementation's own matcher is exercised by the
   // single call below instead of being called a second time here.
   bool masterFoundMatch = ablationCallMatcherOnce(_index->getMasterTree(), cl, _subsumptionResolution);

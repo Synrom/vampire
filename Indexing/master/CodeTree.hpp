@@ -43,13 +43,6 @@ public:
   struct SearchStruct;
   struct CodeOp;
 
-  /** Ablation-study op-count instrumentation: number of CodeOps executed
-   * (excluding NEXT ops) and number of NEXT ops executed, accumulated across
-   * a single top-level ClauseMatcher::next() call. Reset and read by the
-   * caller; incremented inside Matcher::execute(). */
-  static size_t executedOpsCount;
-  static size_t executedNextOpsCount;
-
 protected:
   /**
   * During the destruction of the CodeTree,

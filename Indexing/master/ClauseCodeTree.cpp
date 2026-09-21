@@ -557,17 +557,6 @@ void ClauseCodeTree::ClauseMatcher::reset()
 Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
 {
   TIME_TRACE("Clause Matcher next master")
-  CodeTree::executedOpsCount = 0;
-  CodeTree::executedNextOpsCount = 0;
-  struct RecordOpCounts {
-    ~RecordOpCounts() {
-      RSTAT_CTR_INC_MANY("executed code ops master", CodeTree::executedOpsCount);
-      RSTAT_CTR_INC_MANY("executed next ops master", CodeTree::executedNextOpsCount);
-      RSTAT_CTR_INC_MANY("executed code ops incl next master",
-          CodeTree::executedOpsCount + CodeTree::executedNextOpsCount);
-      RSTAT_CTR_INC("clause matcher calls master");
-    }
-  } recordOpCounts;
   if(lms.isEmpty()) {
     return 0;
   }
