@@ -112,11 +112,20 @@ ClauseCodeTree::InsertionPosition ClauseCodeTree::matchCode(
     unsigned i = entry.matchedPrefixLength;
     for (; i < length; ++i) {
       CodeOp* chainStart = op;
+      CodeOp** chainStartBlockRef = entry.blockReference;
+      CodeBlock* chainStartBlock = entry.block;
       unsigned funs = 0, grounds = 0;
       for (;;) {
         if (op->isNext()) {
           checkpoints.push({op->_arg(), i});
           ++op;
+          // Like the SEARCH_STRUCT target jump below, this moves to a
+          // position whose own alternative() chain is unrelated to the old
+          // chainStart's -- restart counting from here.
+          chainStart = op;
+          chainStartBlockRef = entry.blockReference;
+          chainStartBlock = entry.block;
+          funs = grounds = 0;
           continue;
         }
         if (op->isSearchStruct()) {
@@ -135,6 +144,16 @@ ClauseCodeTree::InsertionPosition ClauseCodeTree::matchCode(
               op = *target;
               entry.blockReference = target;
               entry.block = firstOpToCodeBlock(op);
+              // A SEARCH_STRUCT target jump lands on a node in a different
+              // subtree, unrelated to chainStart's alternative() chain -- if
+              // funs/grounds kept counting relative to the old chainStart,
+              // a later compressCheckOps(chainStart) call would compress the
+              // wrong (and possibly unrelated, too-short) chain. Restart
+              // counting from here.
+              chainStart = op;
+              chainStartBlockRef = entry.blockReference;
+              chainStartBlock = entry.block;
+              funs = grounds = 0;
               continue;
             }
           } else if (op->getSearchStruct()->getTargetOpPtr<false>(code[i], target) && *target) {
@@ -152,19 +171,30 @@ ClauseCodeTree::InsertionPosition ClauseCodeTree::matchCode(
           }
           goto next_entry;
         }
-        if (compress && op->alternative()->isCheckFun() && ++funs > 5) {
+        // Advance to the alternative first, then decide whether *it* is one
+        // more CHECK_FUN/CHECK_GROUND_TERM alternative to count towards
+        // compression -- counting op->alternative() without moving op onto
+        // it (as this used to) re-inspects the same, single node every spin
+        // of this loop and can reach the threshold (and call
+        // compressCheckOps) with as few as one distinct alternative on the
+        // chain, which then finds nothing to compress and violates
+        // ASS_G(chfOps.size(),1) (a segfault in Release, since targetOp()
+        // underflows length()-1 for an empty SEARCH_STRUCT).
+        entry.blockReference = &op->alternative();
+        op = *entry.blockReference;
+        if (!op->isSearchStruct()) {
+          entry.block = firstOpToCodeBlock(op);
+        }
+        if (compress && op->isCheckFun() && ++funs > 5) {
           compressCheckOps<SearchStruct::FN_STRUCT>(chainStart);
-        } else if (compress && op->alternative()->isCheckGroundTerm() && ++grounds > 3) {
+        } else if (compress && op->isCheckGroundTerm() && ++grounds > 3) {
           compressCheckOps<SearchStruct::GROUND_TERM_STRUCT>(chainStart);
         } else {
-          entry.blockReference = &op->alternative();
-          op = *entry.blockReference;
-          if (!op->isSearchStruct()) {
-            entry.block = firstOpToCodeBlock(op);
-          }
           continue;
         }
         op = chainStart;
+        entry.blockReference = chainStartBlockRef;
+        entry.block = chainStartBlock;
         funs = grounds = 0;
       }
       if (i + 1 == length) {

@@ -118,6 +118,19 @@ public:
 
     struct GVArrComparator;
 
+    unsigned depth;
+    ILStruct* previous;
+
+    unsigned varCnt;
+
+    unsigned* globalVarNumbers;
+
+    unsigned* sortedGlobalVarNumbers;
+
+    /** Permutation that should be applied to bindings so that they will
+     *  correspond to the sortedGlobalVarNumbers */
+    unsigned* globalVarPermutation;
+
     /**
      * A slot into matcher's recorded checkpoints, paired with
      * where to resume matching a successor literal using those checkpoints
@@ -127,19 +140,9 @@ public:
       CodeOp* entry;
     };
 
-    unsigned timestamp;
-    unsigned matchCnt;
-    unsigned varCnt;
-    bool visited;
-    bool finished;
-    bool noNonOppositeMatches;
     bool hasSuccessor=false;
-
     bool hasContinuations=false;
     inline bool reachedByNextOp() const { return hasContinuations; }
-
-    unsigned depth;
-    ILStruct* previous;
 
     /**
      * Number of checkpoint slots the matcher for the successor literal
@@ -155,18 +158,19 @@ public:
     // just for deletion
     unsigned refCount=1;
 
-    unsigned* globalVarNumbers;
-
-    unsigned* sortedGlobalVarNumbers;
-
-    /** Permutation that should be applied to bindings so that they will
-     *  correspond to the sortedGlobalVarNumbers */
-    unsigned* globalVarPermutation;
+    unsigned timestamp;
+    //from here on, the values are valid only if the timestamp is current
 
     void addMatch(unsigned liIndex, DArray<TermList>& bindingArray);
     void deleteMatch(unsigned matchIndex);
     MatchInfo*& getMatch(unsigned matchIndex);
 
+    unsigned matchCnt;
+
+    /** all possible lits were tried to match */
+    bool visited;
+    bool finished;
+    bool noNonOppositeMatches;
   private:
     DArray<MatchInfo*> matches;
   };
