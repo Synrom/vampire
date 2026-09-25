@@ -384,6 +384,31 @@ TEST_FUN(MatchingAgainstExplicitQuery)
   }
 }
 
+TEST_FUN(LazyMatchingWithContinuations)
+{
+  __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION)
+
+  // The ordinary first literal must eventually consider a later binding when
+  // compatibility with the second literal rules out the first one.
+  auto ordinary = clause({ p(f(x1)), q(x1) });
+  checkOptimization({ ordinary }, clause({ p(f(c)), p(f(d)), q(d) }), false, ordinary);
+
+  // A unit clause and a NEXT continuation share the first literal. Finding the
+  // unit must not prevent the binary clause from replaying all its checkpoints.
+  auto unit = clause({ p2(f(x1),c) });
+  auto continued = clause({ p2(f(x1),c), p2(f(x1),d) });
+  ClauseCodeTree tree;
+  tree.insert(unit);
+  tree.insert(continued);
+  ASS_G(InvariantTester(tree).countNextOps(), 0);
+  for (bool sres : {false, true}) {
+    checkOptimization({ unit, continued },
+        clause({ p2(f(c),c), p2(f(d),c), p2(f(d),d) }), sres, continued);
+  }
+  checkOptimization({ unit, continued },
+      clause({ p2(f(c),c), p2(f(d),c), ~p2(f(d),d) }), true, continued);
+}
+
 TEST_FUN(lit_end_alternatives)
 {
   __ALLOW_UNUSED(SYNTAX_SUGAR_SUBSUMPTION_RESOLUTION)

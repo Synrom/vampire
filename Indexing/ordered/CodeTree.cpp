@@ -154,7 +154,7 @@ void CodeTree::MatchInfo::init(ILStruct* ils, unsigned liIndex_, DArray<TermList
 
 
 CodeTree::ILStruct::ILStruct(const Literal* lit, unsigned varCnt, Stack<unsigned>& gvnStack)
-: timestamp(0), varCnt(varCnt), sortedGlobalVarNumbers(0), globalVarPermutation(0)
+: varCnt(varCnt), sortedGlobalVarNumbers(0), globalVarPermutation(0), timestamp(0)
 {
   ASS_EQ(matches.size(), 0); //we don't want any uninitialized pointers in the array
 
@@ -1409,6 +1409,11 @@ void CodeTree::compressCheckOps(CodeOp* chainStart)
   op->setAlternative(0);
 }
 
+// Called from ClauseCodeTree.cpp: without explicit instantiations an optimized
+// build inlines every use inside this file and emits no out-of-line symbol.
+template void CodeTree::compressCheckOps<CodeTree::SearchStruct::FN_STRUCT>(CodeOp*);
+template void CodeTree::compressCheckOps<CodeTree::SearchStruct::GROUND_TERM_STRUCT>(CodeOp*);
+
 //////////// removal //////////////
 
 // Find the instruction in the block starting at first that references target
@@ -1491,7 +1496,6 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
 
     CodeOp firstOpCopy= *firstOp;
 
-    ILStruct* previous = nullptr;
     for (unsigned i = cb->length(); i-- > 0;) {
       if ((*cb)[i].isLitEnd()) {
         ILStruct* ils = (*cb)[i].getILS();
@@ -1501,7 +1505,6 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
           }
           return;
         }
-        previous = ils->previous;
         delete ils;
         (*cb)[i].makeFail();
       }
