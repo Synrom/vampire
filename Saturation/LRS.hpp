@@ -17,6 +17,7 @@
 #define __LRS__
 
 #include "Forwards.hpp"
+#include <fstream>
 
 #include "Otter.hpp"
 

@@ -13,6 +13,7 @@
  */
 
 #include <utility>
+#include "Indexing/opt/Experiment.hpp"
 
 #include "Debug/RuntimeStatistics.hpp"
 
@@ -564,6 +565,7 @@ bool CodeTree::Matcher<removing, checkRange>::execute()
         btStack.push(BTPoint(tp, op->alternative()));
       }
     }
+    if constexpr (!removing) { if (tree->_clauseCodeTree) { ++executedOps; CT_ORDER_STAT(++OrderExperiment::baselineDispatches[profileDepth]); } }
     switch(op->_instruction()) {
       case SUCCESS_OR_FAIL:
         if(op->isFail()) {
@@ -693,6 +695,7 @@ bool CodeTree::Matcher<removing, checkRange>::prepareLiteral()
   if(curLInfo>=linfoCnt) {
     return false;
   }
+  if constexpr (!removing) { if (tree->_clauseCodeTree) CT_ORDER_STAT(++OrderExperiment::baselineAttempts[profileDepth]); }
   ft=linfos[curLInfo].ft;
   tp=0;
   op=entry;

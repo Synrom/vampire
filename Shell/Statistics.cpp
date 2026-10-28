@@ -1,3 +1,4 @@
+#include "Indexing/opt/Experiment.hpp"
 /*
  * This file is part of the source code of the software program
  * Vampire. It is protected by applicable
@@ -65,6 +66,7 @@ void Statistics::explainRefutationNotFound(std::ostream& out)
 
 void Statistics::print(std::ostream& out)
 {
+  Indexing::OrderExperiment::print(out);
   if (env.options->statistics() != Options::Statistics::NONE) {
 
   SaturationAlgorithm::tryUpdateFinalClauseCount();

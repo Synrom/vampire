@@ -1,0 +1,34 @@
+[
+  {
+    "queries": 648436,
+    "master_ops": 666285944,
+    "optimized_ops": 414055090,
+    "master_hits": 252978,
+    "optimized_hits": 252978,
+    "different_results": 6036,
+    "mismatches": 0,
+    "previous_prunes": 77297425,
+    "capacity_prunes": 16661669,
+    "algorithm": "discount",
+    "saved": 252230854,
+    "saved_percent": 37.856247197074296,
+    "elapsed_seconds": 80.636,
+    "termination": "Refutation"
+  },
+  {
+    "queries": 226159,
+    "master_ops": 536343845,
+    "optimized_ops": 330924444,
+    "master_hits": 135638,
+    "optimized_hits": 135638,
+    "different_results": 1538,
+    "mismatches": 0,
+    "previous_prunes": 64535983,
+    "capacity_prunes": 11005179,
+    "algorithm": "otter",
+    "saved": 205419401,
+    "saved_percent": 38.299945625366504,
+    "elapsed_seconds": 69.623,
+    "termination": "Refutation"
+  }
+]

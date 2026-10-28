@@ -37,6 +37,7 @@ using namespace Kernel;
 class CodeTree
 {
 public:
+  inline static uint64_t executedOps = 0;
   struct ILStruct;
   struct SearchStruct;
   struct CodeOp;
@@ -369,6 +370,7 @@ public:
      */
     CodeOp* op;
 
+    unsigned profileDepth=0;
     BindingArray bindings;
 
     bool keepRecycled() const

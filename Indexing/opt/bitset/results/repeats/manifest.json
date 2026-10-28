@@ -1,0 +1,20 @@
+{
+  "binary": "./vampire",
+  "input": "~/condensed_detachment_4.p",
+  "output": "Indexing/opt/bitset/results/repeats",
+  "variants": [
+    "cheap"
+  ],
+  "sorts": [
+    "sharing"
+  ],
+  "algorithms": [
+    "discount",
+    "otter"
+  ],
+  "mode": "paired",
+  "jobs": 2,
+  "repeats": 2,
+  "binary_sha256": "29466e5536e0eebe22f2c7ad0884f4b95faa4725fa4fd9fbb1693489a0113acc",
+  "input_sha256": "d908978970aa8425be5c44af2e2fda14b49ddd522898c6777c142b0cbf97e50f"
+}

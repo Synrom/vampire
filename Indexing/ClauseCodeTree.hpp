@@ -97,6 +97,7 @@ public:
     void reset();
     bool keepRecycled() const { return lInfos.keepRecycled(); }
 
+    uint64_t executedCodeOps = 0;
     Clause* next(int& resolvedQueryLit);
 
     bool matched() { return lms.isNonEmpty() && lms.top()->success(); }

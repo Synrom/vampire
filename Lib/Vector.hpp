@@ -25,6 +25,8 @@
 
 namespace Indexing {
   class CodeTree;
+  class OptCodeTree;
+  class BitsetCodeTree;
   class ClauseCodeTree;
 }
 
@@ -117,6 +119,8 @@ public:
   } // toString
 
   friend class Indexing::CodeTree;
+  friend class Indexing::OptCodeTree;
+  friend class Indexing::BitsetCodeTree;
   friend class Indexing::ClauseCodeTree;
 
   /**

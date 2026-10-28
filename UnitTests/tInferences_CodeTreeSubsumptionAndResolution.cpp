@@ -325,3 +325,83 @@ TEST_SIMPLIFICATION(neg_sub_res_test12,
 )
 
 }
+
+// Regression query observed while testing the ordering/capacity interaction in otter.
+TEST_SIMPLIFICATION(order_pruning_multi_literal_domains,
+  tester()
+    .simplifyWith({ clause({ ~p(x1), ~p(i2(x2,x3)),
+      ~p(i2(i2(x4,i2(x5,x3)),i2(x5,x4))), p(i2(x2,x1)) }) })
+    .toSimplify({ clause({ ~p(i2(i2(x1,i2(x2,x3)),i2(x2,x1))),
+      p(i2(x4,x5)), ~p(x5), ~p(x6), ~p(i2(x4,x3)) }) })
+    .expected({})
+)
+
+// Differential coverage for boundary masks, opposite polarity, equality orientation,
+// prefix sharing, and removal. Each variant is selected in a separate test process.
+TEST_FUN(bitset_boundary_differential)
+{
+  MY_SYNTAX_SUGAR
+  Problem problem;
+  resetAndFillEnvOptions(OptionMap{}, problem);
+  MockedSaturationAlgorithm alg(problem, *env.options);
+  Indexing::ClauseCodeTree baseline;
+  Indexing::BitsetClauseCodeTree optimized;
+  Indexing::ClauseCodeTree::ClauseMatcher cm;
+  Indexing::BitsetClauseCodeTree::ClauseMatcher bm;
+  std::vector<Lit> pool={p(x), p(f(x)), p(f(f(x))), ~p(x), ~p(g(y)),
+      q(x), q(g(y)), ~q(f(x)), f(x)==g(y), g(y)==f(x), f(x)!=g(y),
+      p(c), p(f(c)), ~p(d), q(d), f(c)==g(d)};
+  uint32_t state=1729;
+  auto random=[&]() { state=1664525u*state+1013904223u; return state; };
+  auto makeClause=[&](unsigned length) {
+    Stack<Lit> lits;
+    for (unsigned i=0; i<length; ++i) lits.push(pool[random()%pool.size()]);
+    return clause(std::move(lits));
+  };
+  auto compare=[&](Clause* query) {
+    for (bool resolution : {false,true}) {
+      cm.init(&baseline,query,resolution); bm.init(&optimized,query,resolution);
+      int a=-1,b=-1;
+      auto expected=cm.next(a); auto actual=bm.next(b);
+      ASS(!expected || actual);
+      cm.reset(); bm.reset();
+    }
+  };
+  std::vector<Clause*> stored;
+  for (unsigned i=0; i<40; ++i) {
+    auto cl=makeClause(1+random()%4);
+    stored.push_back(cl); baseline.insert(cl); optimized.insert(cl);
+    compare(cl);
+    for (unsigned j=0; j<30; ++j) compare(makeClause(1+random()%6));
+  }
+  for (unsigned i=0; i<stored.size(); i+=2) {
+    baseline.remove(stored[i]); optimized.remove(stored[i]);
+    for (unsigned j=0; j<30; ++j) compare(makeClause(1+random()%6));
+  }
+  Ordering::unsetGlobalOrdering();
+}
+
+TEST_FUN(bitset_boundary_sizes)
+{
+  MY_SYNTAX_SUGAR
+  Problem problem;
+  resetAndFillEnvOptions(OptionMap{}, problem);
+  MockedSaturationAlgorithm alg(problem, *env.options);
+  Indexing::ClauseCodeTree baseline;
+  Indexing::BitsetClauseCodeTree optimized;
+  auto indexed=clause({p(f(f(x))),p(f(x)),p(x)});
+  baseline.insert(indexed); optimized.insert(indexed);
+  for (unsigned length : {3u,63u,64u,65u}) {
+    Stack<Lit> lits;
+    TermSugar term=c;
+    for (unsigned i=0; i<length; ++i) { lits.push(p(term)); term=f(term); }
+    auto query=clause(std::move(lits));
+    Indexing::ClauseCodeTree::ClauseMatcher cm;
+    Indexing::BitsetClauseCodeTree::ClauseMatcher bm;
+    cm.init(&baseline,query,true); bm.init(&optimized,query,true);
+    int a=-1,b=-1;
+    ASS(cm.next(a)); ASS(bm.next(b));
+    cm.reset(); bm.reset();
+  }
+  Ordering::unsetGlobalOrdering();
+}

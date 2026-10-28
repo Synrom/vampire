@@ -1,0 +1,24 @@
+{
+  "binary": "/tmp/vampire-bitset-runtime",
+  "input": "~/condensed_detachment_4.p",
+  "output": "Indexing/opt/bitset/results/runtime",
+  "variants": [
+    "off",
+    "cheap",
+    "balanced",
+    "cached_full"
+  ],
+  "sorts": [
+    "sharing",
+    "weight"
+  ],
+  "algorithms": [
+    "discount",
+    "otter"
+  ],
+  "mode": "paired",
+  "jobs": 4,
+  "repeats": 1,
+  "binary_sha256": "0f2626476a0103048a04fbd7190095846ca2c775ac5b2803e3b257f89b1ebfef",
+  "input_sha256": "d908978970aa8425be5c44af2e2fda14b49ddd522898c6777c142b0cbf97e50f"
+}

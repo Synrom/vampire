@@ -1,0 +1,114 @@
+[
+  {
+    "variant": "off",
+    "sort": "sharing",
+    "algorithm": "discount",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "off",
+    "sort": "sharing",
+    "algorithm": "otter",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "off",
+    "sort": "weight",
+    "algorithm": "discount",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "off",
+    "sort": "weight",
+    "algorithm": "otter",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "cheap",
+    "sort": "sharing",
+    "algorithm": "discount",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "cheap",
+    "sort": "sharing",
+    "algorithm": "otter",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "cheap",
+    "sort": "weight",
+    "algorithm": "discount",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "cheap",
+    "sort": "weight",
+    "algorithm": "otter",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "balanced",
+    "sort": "sharing",
+    "algorithm": "discount",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "balanced",
+    "sort": "sharing",
+    "algorithm": "otter",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "balanced",
+    "sort": "weight",
+    "algorithm": "discount",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "balanced",
+    "sort": "weight",
+    "algorithm": "otter",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "cached_full",
+    "sort": "sharing",
+    "algorithm": "discount",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "cached_full",
+    "sort": "sharing",
+    "algorithm": "otter",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "cached_full",
+    "sort": "weight",
+    "algorithm": "discount",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "cached_full",
+    "sort": "weight",
+    "algorithm": "otter",
+    "repetition": 0,
+    "returncode": 0
+  }
+]

@@ -352,6 +352,7 @@ void ClauseCodeTree::LiteralMatcher::init(const CodeTree& tree_, CodeOp* entry_,
     fresh=false;
     CodeOp* sop=entry;
     while(sop) {
+      ++CodeTree::executedOps;
       if(sop->isSuccess()) {
         eagerResults.push(sop);
       }
@@ -470,6 +471,7 @@ void ClauseCodeTree::ClauseMatcher::init(ClauseCodeTree* tree_, Clause* query_, 
 {
   ASS(!tree_->isEmpty());
 
+  executedCodeOps = 0;
   query=query_;
   tree=tree_;
   sres=sres_;
@@ -551,6 +553,11 @@ void ClauseCodeTree::ClauseMatcher::reset()
  */
 Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
 {
+  struct CountScope {
+    uint64_t start = CodeTree::executedOps;
+    uint64_t& count;
+    ~CountScope() { count += CodeTree::executedOps - start; }
+  } countScope{CodeTree::executedOps, executedCodeOps};
   if(lms.isEmpty()) {
     return 0;
   }
@@ -676,6 +683,7 @@ void ClauseCodeTree::ClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuc
   }
 
   Recycled<LiteralMatcher, NoReset> lm;
+  lm->profileDepth=std::min<unsigned>(lms.size(),64);
   lm->init(*tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess);
   lms.push(std::move(lm));
 }

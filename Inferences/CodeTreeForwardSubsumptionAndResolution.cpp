@@ -15,7 +15,8 @@
 #include "Debug/TimeProfiling.hpp"
 
 #include "Lib/Environment.hpp"
-#include "Lib/Random.hpp"
+#include "Indexing/opt/Experiment.hpp"
+#include <cstdlib>
 
 #include "Saturation/SaturationAlgorithm.hpp"
 
@@ -37,33 +38,63 @@ bool CodeTreeForwardSubsumptionAndResolution::perform(Clause *cl, Clause *&repla
   // the profile should say which one ran.
   TIME_TRACE("codetree forward subsumption");
 
-  if (_ct->isEmpty()) {
-    return false;
+  using namespace Indexing::OrderExperiment;
+  const auto& cfg=config();
+  auto optTree=_index->getOptimizedClauseCodeTree();
+  if (cfg.run=="optimized" ? optTree->isEmpty() : _ct->isEmpty()) return false;
+
+  static ClauseCodeTree::ClauseMatcher cm;
+  static Indexing::BitsetClauseCodeTree::ClauseMatcher optimized;
+  int resolvedQueryLit=-1, optimizedResolved=-1;
+  Clause* premise=nullptr;
+  Clause* optimizedPremise=nullptr;
+  uint64_t baseOps=0, optOps=0, baseTime=0, optTime=0;
+  auto baseline=[&] {
+    auto start=now();
+    cm.init(_ct,cl,_subsumptionResolution);
+    premise=cm.next(resolvedQueryLit);
+    baseOps=cm.executedCodeOps;
+    cm.reset();
+    baseTime=now()-start;
+  };
+  auto candidate=[&] {
+    auto start=now();
+    optimized.init(optTree,cl,_subsumptionResolution);
+    optimizedPremise=optimized.next(optimizedResolved);
+    optOps=optimized.executedCodeOps;
+    optimized.reset();
+    optTime=now()-start;
+  };
+  // Alternate measurement order to reduce systematic warm-cache bias.
+  if (cfg.run=="baseline") baseline();
+  else if (cfg.run=="optimized") candidate();
+  else if (queries%2) { candidate(); baseline(); }
+  else { baseline(); candidate(); }
+  ++queries;
+  masterOps+=baseOps; optimizedOps+=optOps;
+  masterNs+=baseTime; optimizedNs+=optTime;
+  masterHits+=premise!=nullptr; optimizedHits+=optimizedPremise!=nullptr;
+  if (cfg.run=="paired") {
+    differentResults+=(premise!=optimizedPremise || (premise && resolvedQueryLit!=optimizedResolved));
+    if (premise && !optimizedPremise) {
+      ++mismatches;
+      print(std::cerr);
+      std::cerr << "Order pruning missed query: " << cl->toString() << "\n"
+                << "Baseline premise: " << premise->toString() << std::endl;
+      std::abort();
+    }
+    ASS(!optimizedPremise || (optimizedResolved==-1 ?
+        satSubs.checkSubsumption(optimizedPremise,cl) :
+        satSubs.checkSubsumptionResolutionWithLiteral(optimizedPremise,cl,optimizedResolved)));
   }
+  if (cfg.run=="optimized") { premise=optimizedPremise; resolvedQueryLit=optimizedResolved; }
 
-  // under randomized simplifications, each subsumption resolution match is with this
-  // probability dropped, giving the next match (possibly a proper subsumption, which
-  // is never leaky) a chance instead (to be tuned)
-  constexpr double RSI_SKIP_PROB = 0.02;
-  bool rsi = env.options->randomizedSimplifications();
-
-  static typename ClauseCodeTree::ClauseMatcher cm;
-
-  cm.init(_ct, cl, _subsumptionResolution);
-
-  Clause* premise;
-  int resolvedQueryLit;
-
-  while ((premise = cm.next(resolvedQueryLit))) {
+  if (premise) {
     if (resolvedQueryLit == -1) {
       ASS(satSubs.checkSubsumption(premise, cl));
       premises = pvi(getSingletonIterator(premise));
       env.statistics->forwardSubsumed++;
-      cm.reset();
       return true;
-    }
-    if (rsi && Random::getDouble(0.0,1.0) < RSI_SKIP_PROB) {
-      continue; // drop this candidate; the next match gets a chance
     }
     ASS(satSubs.checkSubsumptionResolutionWithLiteral(premise, cl, resolvedQueryLit));
 
@@ -78,11 +109,9 @@ bool CodeTreeForwardSubsumptionAndResolution::perform(Clause *cl, Clause *&repla
     if(env.options->proofExtra() == Options::ProofExtra::FULL)
       env.proofExtra.insert(replacement, new LiteralInferenceExtra((*cl)[resolvedQueryLit]));
     premises = pvi(getSingletonIterator(premise));
-    cm.reset();
     return true;
   }
 
-  cm.reset();
   return false;
 }
 

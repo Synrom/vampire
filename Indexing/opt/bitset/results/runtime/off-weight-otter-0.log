@@ -1,0 +1,91 @@
+% Experiment: variant=off sort=weight run=paired repetition=0
+% Running in auto input_syntax mode. Trying TPTP
+% Refutation found. Thanks to Tanya!
+% SZS status Unsatisfiable for condensed_detachment_4
+% SZS output start Proof for condensed_detachment_4
+1. ~p(i(X1,X0)) | ~p(X1) | p(X0) [input(assumption)]
+2. ~p(i(i(i(a,i(b,c)),c),i(b,a))) [input(assumption)]
+3. p(i(X0,i(i(X1,i(X2,X0)),i(X2,X1)))) [input(assumption)]
+4. p(i(i(X1,i(X2,X0)),i(X2,X1))) | ~p(X0) [resolution 3,1]
+5. ~p(i(X1,i(X2,X0))) | ~p(X0) | p(i(X2,X1)) [resolution 4,1]
+6. p(i(i(X1,i(X0,X2)),X2)) | ~p(i(X0,X1)) [resolution 5,3]
+7. p(i(X1,i(X0,i(X1,X2)))) | ~p(X0) | ~p(X2) [resolution 5,4]
+8. ~p(i(X1,i(X0,X2))) | ~p(i(X0,X1)) | p(X2) [resolution 6,1]
+9. p(i(X3,i(X1,i(X0,i(X3,X2))))) | ~p(X2) | ~p(i(X0,X1)) [resolution 6,5]
+10. ~p(i(X2,X1)) | ~p(X1) | ~p(X0) | p(i(X0,X2)) [resolution 7,5]
+11. p(i(X0,i(X2,X1))) | ~p(X1) | ~p(X2) | ~p(X0) [resolution 7,1]
+12. ~p(i(i(X0,i(X1,X2)),X2)) | p(i(X1,X0)) [resolution 8,3]
+14. ~p(i(X0,i(X1,i(X0,X2)))) | p(X1) | ~p(X2) [resolution 8,4]
+15. ~p(i(X0,i(X1,i(X2,i(X0,X3))))) | p(X3) | ~p(i(X2,X1)) [resolution 8,6]
+22. ~p(X0) | ~p(X1) | ~p(X2) | ~p(i(X1,X0)) | ~p(X3) | p(i(X3,X2)) [resolution 11,10]
+41. 4 <=> ! [X2] : ~p(X2) [avatar definition]
+42. ~p(X2) <- (4) [avatar component clause 41]
+44. 5 <=> ! [X0,X1] : (~p(X0) | ~p(X1) | p(i(X1,X0))) [avatar definition]
+45. p(i(X1,X0)) | ~p(X1) | ~p(X0) <- (5) [avatar component clause 44]
+47. ~p(X1) | ~p(X2) | ~p(i(X1,X0)) | ~p(X3) | p(i(X3,X2)) [forward subsumption resolution 22,1]
+50. 6 <=> ! [X0,X1] : (~p(X1) | ~p(i(X1,X0))) [avatar definition]
+51. ~p(i(X1,X0)) | ~p(X1) <- (6) [avatar component clause 50]
+52. 5 | 6 [avatar split clause 47,50,44]
+54. ~p(i(X1,i(X3,X0))) | ~p(i(X1,X2)) | ~p(X0) | p(i(X2,X3)) [resolution 9,5]
+56. p(i(X2,i(X1,i(X3,X0)))) | ~p(i(X1,X2)) | ~p(X3) | ~p(X0) [resolution 9,1]
+95. p(i(X0,i(X1,X1))) | ~p(X0) [resolution 14,3]
+101. ~p(i(X1,i(i(X2,X0),i(X1,X2)))) | p(X0) [resolution 15,3]
+113. ~p(X0) | ~p(X0) | p(i(X1,X1)) [resolution 95,1]
+115. ~p(X0) | p(i(X1,X1)) [duplicate literal removal 113]
+118. 10 <=> ! [X1] : p(i(X1,X1)) [avatar definition]
+119. p(i(X1,X1)) <- (10) [avatar component clause 118]
+120. 10 | 4 [avatar split clause 115,41,118]
+125. $false <- (4) [resolution 42,3]
+133. ~4 [avatar contradiction clause 125]
+138. p(i(X1,i(X1,X0))) | ~p(X0) <- (10) [resolution 119,5]
+242. ~p(i(X0,X1)) | ~p(X2) | p(i(X1,X0)) | ~p(X2) <- (10) [resolution 54,138]
+248. ~p(i(X0,X1)) | ~p(X2) | p(i(X1,X0)) <- (10) [duplicate literal removal 242]
+251. 14 <=> ! [X0,X1] : (~p(i(X0,X1)) | p(i(X1,X0))) [avatar definition]
+252. ~p(i(X0,X1)) | p(i(X1,X0)) <- (14) [avatar component clause 251]
+253. 4 | 14 | ~10 [avatar split clause 248,118,251,41]
+268. ~p(i(X0,X1)) | ~p(X2) | ~p(X3) | ~p(i(X1,X4)) | ~p(i(X2,X3)) | p(i(X4,X0)) [resolution 56,54]
+284. ~p(i(X0,X1)) | ~p(X2) | ~p(i(X1,X4)) | ~p(i(X2,X3)) | p(i(X4,X0)) [forward subsumption resolution 268,1]
+286. 15 <=> ! [X4,X0,X1] : (~p(i(X0,X1)) | p(i(X4,X0)) | ~p(i(X1,X4))) [avatar definition]
+287. ~p(i(X1,X4)) | p(i(X4,X0)) | ~p(i(X0,X1)) <- (15) [avatar component clause 286]
+288. 6 | 15 [avatar split clause 284,286,50]
+294. ~p(X0) | ~p(X1) | ~p(X2) <- (6) [resolution 51,7]
+318. 4 | 4 | 4 | ~6 [avatar split clause 294,50,41,41,41]
+352. p(i(i(i(X0,i(X1,X2)),i(X1,X0)),X2)) <- (14) [resolution 252,3]
+465. ~p(i(i(X2,X0),i(X1,X2))) | ~p(X1) | p(X0) <- (5) [resolution 101,45]
+474. p(i(i(i(X0,i(X1,X2)),i(X1,X0)),X3)) | ~p(i(X3,X2)) <- (15) [resolution 287,3]
+1196. ~p(i(X0,i(X1,i(i(X1,X0),X2)))) | p(X2) <- (5) [resolution 465,3]
+1207. p(i(X1,i(X0,X2))) | ~p(X0) | ~p(i(X1,X2)) <- (5) [resolution 465,6]
+3397. ~p(i(X1,i(i(X0,X1),X2))) | ~p(X0) | p(X2) <- (5) [resolution 1207,1196]
+5434. p(i(X2,i(X0,i(X2,X1)))) | ~p(i(X0,X1)) <- (15) [resolution 474,12]
+11200. ~p(i(i(X0,X1),X2)) | p(i(X1,X2)) | ~p(X0) <- (5, 15) [resolution 3397,5434]
+43181. ~p(i(X1,i(X0,X2))) | p(i(i(X0,X1),X2)) <- (5, 14, 15) [resolution 11200,352]
+163493. p(i(i(i(X0,i(X1,X2)),X2),i(X1,X0))) <- (5, 14, 15) [resolution 43181,3]
+259800. $false <- (5, 14, 15) [resolution 163493,2]
+260366. ~5 | ~14 | ~15 [avatar contradiction clause 259800]
+s4. 5 | 6 [sat_conversion 52]
+s8. 4 | 10 [sat_conversion 120]
+s10. ~4 [sat_conversion 133]
+s13. 4 | ~10 | 14 [sat_conversion 253]
+s14. 6 | 15 [sat_conversion 288]
+s26. 4 | 4 | 4 | ~6 [sat_conversion 318]
+s27. 4 | ~6 [rat s26]
+s5766. ~5 | ~14 | ~15 [sat_conversion 260366]
+s6424. ~6 [rat s27,s10]
+s6786. 15 [rat s14,s6424]
+s7134. 10 [rat s8,s10]
+s7303. 14 [rat s13,s10,s7134]
+s7390. ~5 [rat s5766,s6786,s7303]
+s7729. # [rat s4,s6424,s7390]
+260367. $false [avatar sat refutation s7729]
+% SZS output end Proof for condensed_detachment_4
+% Order pruning: variant=off run=paired sort=weight queries=226159 master_ops=536343845 optimized_ops=619219597 master_hits=135638 optimized_hits=135638 different_results=2430 mismatches=0 master_ns=20173434965 optimized_ns=24439678575 master_index_ns=462890126 optimized_index_ns=303967374 query_comparisons=0 insertion_comparisons=0 terminal_shortcuts=0 domain_builds=0 support_builds=0
+% Order layout: base_op=16 opt_op=16 base_il=88 opt_il=112
+% ------------------------------
+% Version: Vampire 5.1.0 (Release build, commit 2e0034cde on 2026-09-18 16:00:11 +0100)
+% CaDiCaL version: 2.1.3
+% Termination reason: Refutation
+% Time elapsed: 46.890 s
+% Peak memory usage: 301 MB
+% Instructions burned: 188811 (million)
+% ------------------------------
+% ------------------------------

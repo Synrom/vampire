@@ -1,0 +1,30 @@
+[
+  {
+    "variant": "cheap",
+    "sort": "sharing",
+    "algorithm": "discount",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "cheap",
+    "sort": "sharing",
+    "algorithm": "otter",
+    "repetition": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "cheap",
+    "sort": "sharing",
+    "algorithm": "discount",
+    "repetition": 1,
+    "returncode": 0
+  },
+  {
+    "variant": "cheap",
+    "sort": "sharing",
+    "algorithm": "otter",
+    "repetition": 1,
+    "returncode": 0
+  }
+]

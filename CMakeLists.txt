@@ -228,6 +228,10 @@ endif()
 # Vampire
 ################################################################
 # wrap up common object files so not built multiple times for each target
+option(CODETREE_ORDER_PROFILE "Collect detailed experimental code-tree pruning profiles" OFF)
+set_source_files_properties(
+  Indexing/CodeTree.cpp Indexing/opt/bitset/CodeTree.cpp Indexing/opt/bitset/ClauseCodeTree.cpp
+  PROPERTIES COMPILE_DEFINITIONS "CT_ORDER_PROFILE=$<BOOL:${CODETREE_ORDER_PROFILE}>")
 add_library(common OBJECT ${SOURCES})
 
 # the actual Vampire executable

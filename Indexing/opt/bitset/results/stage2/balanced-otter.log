@@ -1,0 +1,112 @@
+% Running in auto input_syntax mode. Trying TPTP
+% Refutation found. Thanks to Tanya!
+% SZS status Unsatisfiable for condensed_detachment_4
+% SZS output start Proof for condensed_detachment_4
+1. ~p(i(X1,X0)) | ~p(X1) | p(X0) [input(assumption)]
+2. ~p(i(i(i(a,i(b,c)),c),i(b,a))) [input(assumption)]
+3. p(i(X0,i(i(X1,i(X2,X0)),i(X2,X1)))) [input(assumption)]
+4. p(i(i(X1,i(X2,X0)),i(X2,X1))) | ~p(X0) [resolution 3,1]
+5. ~p(i(X1,i(X2,X0))) | ~p(X0) | p(i(X2,X1)) [resolution 4,1]
+6. p(i(i(X1,i(X0,X2)),X2)) | ~p(i(X0,X1)) [resolution 5,3]
+7. p(i(X1,i(X0,i(X1,X2)))) | ~p(X0) | ~p(X2) [resolution 5,4]
+8. ~p(i(X1,i(X0,X2))) | ~p(i(X0,X1)) | p(X2) [resolution 6,1]
+9. p(i(X3,i(X1,i(X0,i(X3,X2))))) | ~p(X2) | ~p(i(X0,X1)) [resolution 6,5]
+10. ~p(i(X2,X1)) | ~p(X1) | ~p(X0) | p(i(X0,X2)) [resolution 7,5]
+11. p(i(X0,i(X2,X1))) | ~p(X1) | ~p(X2) | ~p(X0) [resolution 7,1]
+12. ~p(i(i(X0,i(X1,X2)),X2)) | p(i(X1,X0)) [resolution 8,3]
+14. ~p(i(X0,i(X1,i(X0,X2)))) | p(X1) | ~p(X2) [resolution 8,4]
+15. ~p(i(X0,i(X1,i(X2,i(X0,X3))))) | p(X3) | ~p(i(X2,X1)) [resolution 8,6]
+22. ~p(X0) | ~p(X1) | ~p(X2) | ~p(i(X1,X0)) | ~p(X3) | p(i(X3,X2)) [resolution 11,10]
+41. 4 <=> ! [X2] : ~p(X2) [avatar definition]
+42. ~p(X2) <- (4) [avatar component clause 41]
+44. 5 <=> ! [X0,X1] : (~p(X0) | ~p(X1) | p(i(X1,X0))) [avatar definition]
+45. p(i(X1,X0)) | ~p(X1) | ~p(X0) <- (5) [avatar component clause 44]
+47. ~p(X1) | ~p(X2) | ~p(i(X1,X0)) | ~p(X3) | p(i(X3,X2)) [forward subsumption resolution 22,1]
+50. 6 <=> ! [X0,X1] : (~p(X1) | ~p(i(X1,X0))) [avatar definition]
+51. ~p(i(X1,X0)) | ~p(X1) <- (6) [avatar component clause 50]
+52. 5 | 6 [avatar split clause 47,50,44]
+54. ~p(i(X1,i(X3,X0))) | ~p(i(X1,X2)) | ~p(X0) | p(i(X2,X3)) [resolution 9,5]
+56. p(i(X2,i(X1,i(X3,X0)))) | ~p(i(X1,X2)) | ~p(X3) | ~p(X0) [resolution 9,1]
+95. p(i(X0,i(X1,X1))) | ~p(X0) [resolution 14,3]
+101. ~p(i(X1,i(i(X2,X0),i(X1,X2)))) | p(X0) [resolution 15,3]
+113. ~p(X0) | ~p(X0) | p(i(X1,X1)) [resolution 95,1]
+115. ~p(X0) | p(i(X1,X1)) [duplicate literal removal 113]
+118. 10 <=> ! [X1] : p(i(X1,X1)) [avatar definition]
+119. p(i(X1,X1)) <- (10) [avatar component clause 118]
+120. 10 | 4 [avatar split clause 115,41,118]
+125. $false <- (4) [resolution 42,3]
+133. ~4 [avatar contradiction clause 125]
+138. p(i(X1,i(X1,X0))) | ~p(X0) <- (10) [resolution 119,5]
+242. ~p(i(X0,X1)) | ~p(X2) | p(i(X1,X0)) | ~p(X2) <- (10) [resolution 54,138]
+248. ~p(i(X0,X1)) | ~p(X2) | p(i(X1,X0)) <- (10) [duplicate literal removal 242]
+251. 14 <=> ! [X0,X1] : (~p(i(X0,X1)) | p(i(X1,X0))) [avatar definition]
+252. ~p(i(X0,X1)) | p(i(X1,X0)) <- (14) [avatar component clause 251]
+253. 4 | 14 | ~10 [avatar split clause 248,118,251,41]
+268. ~p(i(X0,X1)) | ~p(X2) | ~p(X3) | ~p(i(X1,X4)) | ~p(i(X2,X3)) | p(i(X4,X0)) [resolution 56,54]
+284. ~p(i(X0,X1)) | ~p(X2) | ~p(i(X1,X4)) | ~p(i(X2,X3)) | p(i(X4,X0)) [forward subsumption resolution 268,1]
+286. 15 <=> ! [X4,X0,X1] : (~p(i(X0,X1)) | p(i(X4,X0)) | ~p(i(X1,X4))) [avatar definition]
+287. ~p(i(X1,X4)) | p(i(X4,X0)) | ~p(i(X0,X1)) <- (15) [avatar component clause 286]
+288. 6 | 15 [avatar split clause 284,286,50]
+294. ~p(X0) | ~p(X1) | ~p(X2) <- (6) [resolution 51,7]
+318. 4 | 4 | 4 | ~6 [avatar split clause 294,50,41,41,41]
+352. p(i(i(i(X0,i(X1,X2)),i(X1,X0)),X2)) <- (14) [resolution 252,3]
+465. ~p(i(i(X2,X0),i(X1,X2))) | ~p(X1) | p(X0) <- (5) [resolution 101,45]
+474. p(i(i(i(X0,i(X1,X2)),i(X1,X0)),X3)) | ~p(i(X3,X2)) <- (15) [resolution 287,3]
+1196. ~p(i(X0,i(X1,i(i(X1,X0),X2)))) | p(X2) <- (5) [resolution 465,3]
+1207. p(i(X1,i(X0,X2))) | ~p(X0) | ~p(i(X1,X2)) <- (5) [resolution 465,6]
+3397. ~p(i(X1,i(i(X0,X1),X2))) | ~p(X0) | p(X2) <- (5) [resolution 1207,1196]
+5434. p(i(X2,i(X0,i(X2,X1)))) | ~p(i(X0,X1)) <- (15) [resolution 474,12]
+11200. ~p(i(i(X0,X1),X2)) | p(i(X1,X2)) | ~p(X0) <- (5, 15) [resolution 3397,5434]
+43181. ~p(i(X1,i(X0,X2))) | p(i(i(X0,X1),X2)) <- (5, 14, 15) [resolution 11200,352]
+163493. p(i(i(i(X0,i(X1,X2)),X2),i(X1,X0))) <- (5, 14, 15) [resolution 43181,3]
+259800. $false <- (5, 14, 15) [resolution 163493,2]
+260366. ~5 | ~14 | ~15 [avatar contradiction clause 259800]
+s4. 5 | 6 [sat_conversion 52]
+s8. 4 | 10 [sat_conversion 120]
+s10. ~4 [sat_conversion 133]
+s13. 4 | ~10 | 14 [sat_conversion 253]
+s14. 6 | 15 [sat_conversion 288]
+s26. 4 | 4 | 4 | ~6 [sat_conversion 318]
+s27. 4 | ~6 [rat s26]
+s5766. ~5 | ~14 | ~15 [sat_conversion 260366]
+s6424. ~6 [rat s27,s10]
+s6786. 15 [rat s14,s6424]
+s7134. 10 [rat s8,s10]
+s7303. 14 [rat s13,s10,s7134]
+s7390. ~5 [rat s5766,s6786,s7303]
+s7729. # [rat s4,s6424,s7390]
+260367. $false [avatar sat refutation s7729]
+% SZS output end Proof for condensed_detachment_4
+% Order pruning: variant=balanced run=paired queries=226159 master_ops=536343845 optimized_ops=307643780 master_hits=135638 optimized_hits=135638 different_results=166 mismatches=0 master_ns=20766771166 optimized_ns=17373529662 master_index_ns=451671128 optimized_index_ns=624086316 query_comparisons=18036414 insertion_comparisons=1288224 terminal_shortcuts=161545 domain_builds=10634402 support_builds=2279421
+% Order layout: base_op=16 opt_op=16 base_il=88 opt_il=112
+% Order execution: depth=0 baseline_ops=48109761 optimized_ops=48109760 baseline_attempts=2357061 optimized_attempts=2357060
+% Order execution: depth=1 baseline_ops=149659490 optimized_ops=90246896 baseline_attempts=23642399 optimized_attempts=11923855
+% Order execution: depth=2 baseline_ops=165824048 optimized_ops=91711389 baseline_attempts=37023235 optimized_attempts=13793285
+% Order execution: depth=3 baseline_ops=116655835 optimized_ops=56274441 baseline_attempts=38734346 optimized_attempts=11612378
+% Order execution: depth=4 baseline_ops=42024688 optimized_ops=16614140 baseline_attempts=16753939 optimized_attempts=4035255
+% Order execution: depth=5 baseline_ops=10579877 optimized_ops=2447106 baseline_attempts=4676725 optimized_attempts=628214
+% Order execution: depth=6 baseline_ops=2360728 optimized_ops=402322 baseline_attempts=1107170 optimized_attempts=109991
+% Order execution: depth=7 baseline_ops=485097 optimized_ops=66130 baseline_attempts=230626 optimized_attempts=18099
+% Order execution: depth=8 baseline_ops=92670 optimized_ops=9475 baseline_attempts=46132 optimized_attempts=2791
+% Order execution: depth=9 baseline_ops=9573 optimized_ops=1041 baseline_attempts=4988 optimized_attempts=299
+% Order execution: depth=10 baseline_ops=1015 optimized_ops=72 baseline_attempts=574 optimized_attempts=19
+% Order depth: depth=0 boundaries=226159 informative=0 candidates=2363418 allowed=2363417 greater_relations=0 less_relations=0 greater_removed=0 less_removed=0 used_removed=0 header_removed=1 header_boundaries=1 capacity_removed=0 capacity_boundaries=0 lazy_domains=0 forced_eager=0 forced_eager_ops=0 domains_empty=0 domains_singleton=0 domains_two=0 domains_three=0 domains_four_plus=0
+% Order depth: depth=1 boundaries=2616408 informative=596906 candidates=23637125 allowed=11924002 greater_relations=596906 less_relations=0 greater_removed=1177333 less_removed=0 used_removed=1652032 header_removed=8883758 header_boundaries=2180372 capacity_removed=0 capacity_boundaries=0 lazy_domains=905 forced_eager=0 forced_eager_ops=0 domains_empty=0 domains_singleton=2183510 domains_two=135874 domains_three=49647 domains_four_plus=28419
+% Order depth: depth=2 boundaries=3408236 informative=662706 candidates=36958664 allowed=13793285 greater_relations=533838 less_relations=128868 greater_removed=1457272 less_removed=481907 used_removed=3893818 header_removed=17332382 header_boundaries=3371264 capacity_removed=0 capacity_boundaries=0 lazy_domains=0 forced_eager=0 forced_eager_ops=0 domains_empty=0 domains_singleton=4654168 domains_two=918139 domains_three=509819 domains_four_plus=734346
+% Order depth: depth=3 boundaries=3059613 informative=949273 candidates=38104919 allowed=11612378 greater_relations=488652 less_relations=710632 greater_removed=1718302 less_removed=2359729 used_removed=4008805 header_removed=18405705 header_boundaries=3048878 capacity_removed=0 capacity_boundaries=0 lazy_domains=0 forced_eager=0 forced_eager_ops=0 domains_empty=0 domains_singleton=5037776 domains_two=1431636 domains_three=962545 domains_four_plus=1746882
+% Order depth: depth=4 boundaries=1197308 informative=505575 candidates=16258305 allowed=4035255 greater_relations=319308 less_relations=220215 greater_removed=1290359 less_removed=1005383 used_removed=2022025 header_removed=7905283 header_boundaries=1194701 capacity_removed=0 capacity_boundaries=0 lazy_domains=0 forced_eager=0 forced_eager_ops=0 domains_empty=0 domains_singleton=2934862 domains_two=597705 domains_three=337004 domains_four_plus=919661
+% Order depth: depth=5 boundaries=305241 informative=214427 candidates=4486389 allowed=628214 greater_relations=128542 less_relations=121112 greater_removed=599137 less_removed=514808 used_removed=553838 header_removed=2190392 header_boundaries=304917 capacity_removed=0 capacity_boundaries=0 lazy_domains=0 forced_eager=0 forced_eager_ops=0 domains_empty=0 domains_singleton=1069842 domains_two=157986 domains_three=67452 domains_four_plus=230925
+% Order depth: depth=6 boundaries=63839 informative=48860 candidates=1028805 allowed=109991 greater_relations=32540 less_relations=23756 greater_removed=165957 less_removed=112934 used_removed=139429 header_removed=500494 header_boundaries=63600 capacity_removed=0 capacity_boundaries=0 lazy_domains=0 forced_eager=0 forced_eager_ops=0 domains_empty=0 domains_singleton=305176 domains_two=28512 domains_three=12471 domains_four_plus=36875
+% Order depth: depth=7 boundaries=12188 informative=10288 candidates=216870 allowed=18099 greater_relations=6947 less_relations=6182 greater_removed=37557 less_removed=26052 used_removed=28660 header_removed=106502 header_boundaries=12188 capacity_removed=0 capacity_boundaries=0 lazy_domains=0 forced_eager=0 forced_eager_ops=0 domains_empty=0 domains_singleton=70677 domains_two=4318 domains_three=2325 domains_four_plus=7996
+% Order depth: depth=8 boundaries=2132 informative=1908 candidates=41588 allowed=2791 greater_relations=1180 less_relations=1754 greater_removed=6905 less_removed=6433 used_removed=5126 header_removed=20333 header_boundaries=2132 capacity_removed=0 capacity_boundaries=0 lazy_domains=0 forced_eager=0 forced_eager_ops=0 domains_empty=0 domains_singleton=14214 domains_two=750 domains_three=327 domains_four_plus=1765
+% Order depth: depth=9 boundaries=201 informative=187 candidates=4200 allowed=299 greater_relations=145 less_relations=75 greater_removed=1025 less_removed=379 used_removed=482 header_removed=2015 header_boundaries=201 capacity_removed=0 capacity_boundaries=0 lazy_domains=0 forced_eager=0 forced_eager_ops=0 domains_empty=0 domains_singleton=1554 domains_two=68 domains_three=26 domains_four_plus=161
+% Order depth: depth=10 boundaries=19 informative=19 candidates=423 allowed=19 greater_relations=15 less_relations=9 greater_removed=126 less_removed=39 used_removed=28 header_removed=211 header_boundaries=19 capacity_removed=0 capacity_boundaries=0 lazy_domains=0 forced_eager=0 forced_eager_ops=0 domains_empty=0 domains_singleton=159 domains_two=10 domains_three=1 domains_four_plus=20
+% ------------------------------
+% Version: Vampire 5.1.0 (Release build, commit 2e0034cde on 2026-09-18 16:00:11 +0100)
+% CaDiCaL version: 2.1.3
+% Termination reason: Refutation
+% Time elapsed: 40.649 s
+% Peak memory usage: 271 MB
+% Instructions burned: 177213 (million)
+% ------------------------------
+% ------------------------------
