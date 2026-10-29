@@ -582,7 +582,7 @@ bool CodeTree::Matcher<removing, checkRange>::execute()
         } else {
           //yield successes only in the first round (we don't want to yield the
           //same thing for each query literal)
-          if(curLInfo==0) {
+          if(curLInfo==firstLInfo) {
             return true;
           }
           else {
@@ -655,6 +655,8 @@ void CodeTree::Matcher<removing, checkRange>::init(const CodeTree& tree_, CodeOp
   fresh=true;
   _matched=false;
   curLInfo=0;
+  firstLInfo=0;
+  allowedNormal=allowedOpposite=UINT64_MAX;
 
   bindings.ensure(tree->_maxVarCnt);
   btStack.reset();
@@ -689,6 +691,11 @@ bool CodeTree::Matcher<removing, checkRange>::prepareLiteral()
 {
   if constexpr (removing) {
     RemovingBase::firstsInBlocks->truncate(RemovingBase::initFIBDepth);
+  }
+  if constexpr (!removing) {
+    while (curLInfo<linfoCnt && linfos[curLInfo].litIndex<64 &&
+        !((linfos[curLInfo].opposite ? allowedOpposite : allowedNormal) &
+          (uint64_t(1)<<linfos[curLInfo].litIndex))) ++curLInfo;
   }
   if(curLInfo>=linfoCnt) {
     return false;
@@ -1184,6 +1191,7 @@ void CodeTree::incorporate(CodeStack& code)
 
       if (treeOp->isLitEnd()) {
         lastMatchedILS = treeOp->getILS();
+        lastMatchedILS->continuation.merge(code[i].getILS()->continuation);
       }
 
       //the SEARCH_STRUCT operation does not occur in a CodeBlock

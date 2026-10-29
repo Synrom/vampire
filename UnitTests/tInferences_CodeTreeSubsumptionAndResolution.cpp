@@ -325,3 +325,133 @@ TEST_SIMPLIFICATION(neg_sub_res_test12,
 )
 
 }
+
+// Regression query from the bitset experiment's otter run.
+TEST_SIMPLIFICATION(order_pruning_multi_literal_domains,
+  tester()
+    .simplifyWith({ clause({ ~p(x1), ~p(i2(x2,x3)),
+      ~p(i2(i2(x4,i2(x5,x3)),i2(x5,x4))), p(i2(x2,x1)) }) })
+    .toSimplify({ clause({ ~p(i2(i2(x1,i2(x2,x3)),i2(x2,x1))),
+      p(i2(x4,x5)), ~p(x5), ~p(x6), ~p(i2(x4,x3)) }) })
+    .expected({})
+)
+
+// Compare complete retrieval against an independent SAT subsumption checker.
+// This exercises caches across next() calls, shared prefixes, and removal.
+TEST_FUN(bitset_boundary_differential)
+{
+  MY_SYNTAX_SUGAR
+  Problem problem;
+  resetAndFillEnvOptions(OptionMap{}, problem);
+  MockedSaturationAlgorithm alg(problem, *env.options);
+  Indexing::ClauseCodeTree tree;
+  SATSubsumption::SATSubsumptionAndResolution oracle;
+  std::vector<Clause*> stored;
+  std::vector<Lit> pool={p(x), p(f(x)), p(f(f(x))), ~p(x), ~p(g(y)),
+      q(x), q(g(y)), ~q(f(x)), f(x)==g(y), g(y)==f(x), f(x)!=g(y),
+      p(c), p(f(c)), ~p(d), q(d), f(c)==g(d)};
+  uint32_t state=1729;
+  auto random=[&]() { state=1664525u*state+1013904223u; return state; };
+  auto makeClause=[&](unsigned length) {
+    Stack<Lit> lits;
+    std::vector<Literal*> selected;
+    // The independent SAT checker requires clauses without duplicate literals.
+    while (lits.size()<length) {
+      Literal* lit=pool[(random()>>16)%pool.size()];
+      if (std::find(selected.begin(),selected.end(),lit)!=selected.end()) continue;
+      selected.push_back(lit);
+      lits.push(lit);
+    }
+    return clause(std::move(lits));
+  };
+  auto compare=[&](Clause* query) {
+    for (bool resolution : {false,true}) {
+      Indexing::ClauseCodeTree::ClauseMatcher matcher;
+      matcher.init(&tree,query,resolution);
+      std::vector<Clause*> found;
+      int resolved=-1;
+      while (auto actual=matcher.next(resolved)) {
+        ASS(std::find(stored.begin(),stored.end(),actual)!=stored.end());
+        ASS(resolved==-1 ? oracle.checkSubsumption(actual,query) :
+            oracle.checkSubsumptionResolutionWithLiteral(actual,query,resolved));
+        found.push_back(actual);
+      }
+      matcher.reset();
+      for (auto premise : stored) {
+        if (!premise) continue;
+        // SAT subsumption resolution permits more identifications than this
+        // index. Ordinary multiset subsumption has the same completeness contract.
+        if (oracle.checkSubsumption(premise,query)) {
+          ASS(std::find(found.begin(),found.end(),premise)!=found.end());
+        }
+      }
+    }
+  };
+  for (unsigned i=0; i<24; ++i) {
+    auto cl=makeClause(2+(random()>>16)%3);
+    stored.push_back(cl); tree.insert(cl);
+    compare(cl);
+    for (unsigned j=0; j<16; ++j) compare(makeClause(1+(random()>>16)%6));
+  }
+  for (unsigned i=0; i<stored.size(); i+=2) {
+    tree.remove(stored[i]); stored[i]=nullptr;
+    for (unsigned j=0; j<16; ++j) compare(makeClause(1+(random()>>16)%6));
+  }
+  Ordering::unsetGlobalOrdering();
+}
+
+TEST_FUN(bitset_boundary_sizes)
+{
+  MY_SYNTAX_SUGAR
+  Problem problem;
+  resetAndFillEnvOptions(OptionMap{}, problem);
+  MockedSaturationAlgorithm alg(problem, *env.options);
+  Indexing::ClauseCodeTree tree;
+  auto indexed=clause({p(f(f(x))),p(f(x)),p(x)});
+  tree.insert(indexed);
+  for (unsigned length : {3u,63u,64u,65u}) {
+    Stack<Lit> lits;
+    TermSugar term=c;
+    for (unsigned i=0; i<length; ++i) { lits.push(p(term)); term=f(term); }
+    auto query=clause(std::move(lits));
+    Indexing::ClauseCodeTree::ClauseMatcher matcher;
+    matcher.init(&tree,query,true);
+    int resolved=-1;
+    ASS_EQ(matcher.next(resolved),indexed);
+    matcher.reset();
+  }
+  Ordering::unsetGlobalOrdering();
+}
+
+// A terminal prefix must remain retrievable when no query literal can match its
+// longer continuation. Empty-tree reuse must also reset the root header.
+TEST_FUN(bitset_terminal_prefix)
+{
+  MY_SYNTAX_SUGAR
+  Problem problem;
+  resetAndFillEnvOptions(OptionMap{}, problem);
+  MockedSaturationAlgorithm alg(problem, *env.options);
+  Indexing::ClauseCodeTree tree;
+  auto shortClause=clause({p(f(x))});
+  auto longClause=clause({p(f(x)),q(x)});
+  tree.insert(shortClause); tree.insert(longClause);
+  auto query=clause({p(f(c)),r(d)});
+  Indexing::ClauseCodeTree::ClauseMatcher matcher;
+  matcher.init(&tree,query,false);
+  int resolved=-1;
+  ASS_EQ(matcher.next(resolved),shortClause);
+  ASS(!matcher.next(resolved));
+  matcher.reset();
+  tree.remove(longClause);
+  matcher.init(&tree,query,false);
+  ASS_EQ(matcher.next(resolved),shortClause);
+  matcher.reset();
+  tree.remove(shortClause);
+  // Reuse after becoming empty must forget the previous root header.
+  auto different=clause({q(x)});
+  tree.insert(different);
+  matcher.init(&tree,clause({q(c),r(d)}),false);
+  ASS_EQ(matcher.next(resolved),different);
+  matcher.reset();
+  Ordering::unsetGlobalOrdering();
+}

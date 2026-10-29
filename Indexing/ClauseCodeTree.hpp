@@ -34,7 +34,7 @@ class ClauseCodeTree : public CodeTree
 protected:
   void onCodeOpDestroying(CodeOp* op) override;
   void printSuccess(std::ostream& out, const CodeOp& op) const override;
-  
+
 public:
   ClauseCodeTree();
 
@@ -72,7 +72,7 @@ private:
   struct LiteralMatcher
   : public Matcher</*removing*/false,false>
   {
-    void init(const CodeTree& tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess=false);
+    void init(const CodeTree& tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess=false, uint64_t normal=UINT64_MAX, uint64_t opposite=UINT64_MAX);
     bool next();
     bool doEagerMatching();
 
@@ -105,6 +105,19 @@ public:
     USE_ALLOCATOR(ClauseMatcher);
 
   private:
+    struct MaskPair { uint64_t normal, opposite; };
+    // Complete earlier domains cannot change while their indexed prefix is active.
+    // Cache their original query positions, coalescing polarity and orientation.
+    uint64_t cachedDomains[64];
+    uint64_t cachedDomainReady;
+    unsigned headerIds[128], headerCount;
+    MaskPair headerMasks[128];
+    bool smallQuery;
+    uint64_t fullMask;
+
+    MaskPair headerMask(unsigned header);
+    MaskPair filter(const Continuation& continuation);
+    uint64_t domain(unsigned depth);
     void enterLiteral(CodeOp* entry, bool seekOnlySuccess);
     void leaveLiteral();
     bool canEnterLiteral(CodeOp* op);
@@ -140,6 +153,8 @@ public:
 private:
 
   //////// member variables //////////
+
+  Continuation rootContinuation;
 
 #if VDEBUG
   unsigned _clauseMatcherCounter;
