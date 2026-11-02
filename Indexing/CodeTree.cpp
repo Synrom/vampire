@@ -656,7 +656,7 @@ void CodeTree::Matcher<removing, checkRange>::init(const CodeTree& tree_, CodeOp
   _matched=false;
   curLInfo=0;
   firstLInfo=0;
-  allowedNormal=allowedOpposite=UINT64_MAX;
+  allowedPositions=UINT64_MAX;
 
   bindings.ensure(tree->_maxVarCnt);
   btStack.reset();
@@ -694,7 +694,7 @@ bool CodeTree::Matcher<removing, checkRange>::prepareLiteral()
   }
   if constexpr (!removing) {
     while (curLInfo<linfoCnt && linfos[curLInfo].litIndex<64 &&
-        !((linfos[curLInfo].opposite ? allowedOpposite : allowedNormal) &
+        !(allowedPositions &
           (uint64_t(1)<<linfos[curLInfo].litIndex))) ++curLInfo;
   }
   if(curLInfo>=linfoCnt) {
@@ -1191,7 +1191,6 @@ void CodeTree::incorporate(CodeStack& code)
 
       if (treeOp->isLitEnd()) {
         lastMatchedILS = treeOp->getILS();
-        lastMatchedILS->continuation.merge(code[i].getILS()->continuation);
       }
 
       //the SEARCH_STRUCT operation does not occur in a CodeBlock

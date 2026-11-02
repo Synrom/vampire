@@ -65,19 +65,14 @@ void ClauseCodeTree::insert(Clause* cl)
   static DArray<Literal*> lits;
   lits.initFromArray(clen, *cl);
 
-  if (isEmpty()) rootContinuation={};
   optimizeLiteralOrder(lits);
 
   CodeStack code;
   LitCompiler compiler(code);
 
-  if (clen) rootContinuation.merge(Continuation(lits[0]->header()));
   for(unsigned i=0;i<clen;i++) {
     compiler.nextLit();
     compiler.handleTerm(lits[i]);
-    if (i+1<clen) {
-      code.top().getILS()->continuation=Continuation(lits[i+1]->header());
-    }
   }
   code.push(CodeOp::getSuccess(cl));
 
@@ -339,13 +334,13 @@ bool ClauseCodeTree::removeOneOfAlternatives(CodeOp* op, Clause* cl, Stack<CodeO
  */
 void ClauseCodeTree::LiteralMatcher::init(const CodeTree& tree_, CodeOp* entry_,
 					  LitInfo* linfos_, size_t linfoCnt_,
-					  bool seekOnlySuccess, uint64_t normal, uint64_t opposite)
+					  bool seekOnlySuccess, uint64_t allowed)
 {
   ASS_G(linfoCnt_,0);
 
   Matcher::init(tree_,entry_,linfos_,linfoCnt_);
 
-  allowedNormal=normal; allowedOpposite=opposite;
+  allowedPositions=allowed;
   _eagerlyMatched=false;
   eagerResults.reset();
 
@@ -536,7 +531,6 @@ void ClauseCodeTree::ClauseMatcher::init(ClauseCodeTree* tree_, Clause* query_, 
     sresLiteral=sresNoLiteral;
   }
 
-  headerCount=0;
   smallQuery=query->length()<64;
   fullMask=smallQuery ? ((uint64_t(1)<<query->length())-1) : UINT64_MAX;
   cachedDomainReady=0;
@@ -653,19 +647,6 @@ inline bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
   return true;
 }
 
-ClauseCodeTree::ClauseMatcher::MaskPair
-ClauseCodeTree::ClauseMatcher::headerMask(unsigned header)
-{
-  for (unsigned i=0; i<headerCount; ++i) if (headerIds[i]==header) return headerMasks[i];
-  MaskPair out{0,0};
-  for (unsigned i=0; i<query->length(); ++i) {
-    if ((*query)[i]->header()==header) out.normal |= uint64_t(1)<<i;
-    if ((*query)[i]->complementaryHeader()==header) out.opposite |= uint64_t(1)<<i;
-  }
-  if (headerCount<128) { headerIds[headerCount]=header; headerMasks[headerCount++]=out; }
-  return out;
-}
-
 uint64_t ClauseCodeTree::ClauseMatcher::domain(unsigned depth)
 {
   uint64_t bit=uint64_t(1)<<depth;
@@ -682,16 +663,8 @@ uint64_t ClauseCodeTree::ClauseMatcher::domain(unsigned depth)
   return positions;
 }
 
-ClauseCodeTree::ClauseMatcher::MaskPair
-ClauseCodeTree::ClauseMatcher::filter(const Continuation& continuation)
+uint64_t ClauseCodeTree::ClauseMatcher::allowedPositions()
 {
-  MaskPair allowed{fullMask, sres && sresLiteral==sresNoLiteral ? fullMask : 0};
-  if (continuation.header!=Continuation::ANY_HEADER) {
-    auto mask=headerMask(continuation.header);
-    allowed.normal &= mask.normal;
-    allowed.opposite &= mask.opposite;
-  }
-
   uint64_t occupied=0;
   for (unsigned i=0; i<lms.size(); ++i) {
     // A lazy domain can acquire other images. Only complete singleton domains
@@ -700,9 +673,7 @@ ClauseCodeTree::ClauseMatcher::filter(const Continuation& continuation)
     uint64_t positions=domain(i);
     if (std::has_single_bit(positions)) occupied |= positions;
   }
-  allowed.normal &= ~occupied;
-  allowed.opposite &= ~occupied;
-  return allowed;
+  return fullMask & ~occupied;
 }
 
 /**
@@ -743,15 +714,9 @@ void ClauseCodeTree::ClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuc
     linfoCnt/=2;
   }
 
-  MaskPair allowed{UINT64_MAX,UINT64_MAX};
-  if (!seekOnlySuccess && smallQuery) {
-    const auto& c=lms.isEmpty() ? tree->rootContinuation : lms.top()->getILS()->continuation;
-    if (!c.present) {
-      seekOnlySuccess=true;
-    } else allowed=filter(c);
-  }
+  uint64_t allowed=smallQuery && !seekOnlySuccess ? allowedPositions() : UINT64_MAX;
   Recycled<LiteralMatcher, NoReset> lm;
-  lm->init(*tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess, allowed.normal, allowed.opposite);
+  lm->init(*tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess, allowed);
   lms.push(std::move(lm));
 }
 

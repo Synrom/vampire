@@ -38,23 +38,6 @@ using namespace Kernel;
 class CodeTree
 {
 public:
-  /** Summary of literals following an indexed prefix. Stored once per LIT_END,
-   * never per CodeOp. Removal may leave a weaker (but still sound) summary. */
-  struct Continuation {
-    static constexpr unsigned ANY_HEADER = UINT32_MAX;
-    unsigned header = ANY_HEADER;
-    bool present = false;
-
-    Continuation() = default;
-    explicit Continuation(unsigned h) : header(h), present(true) {}
-
-    void merge(const Continuation& other) {
-      // A clause ending here places no restriction on nonterminal continuations.
-      if (!other.present) return;
-      if (!present) { *this = other; return; }
-      if (header != other.header) header = ANY_HEADER;
-    }
-  };
   struct ILStruct;
   struct SearchStruct;
   struct CodeOp;
@@ -132,7 +115,6 @@ public:
 
     struct GVArrComparator;
 
-    Continuation continuation;
     unsigned depth;
     ILStruct* previous;
 
@@ -389,7 +371,7 @@ public:
     CodeOp* op;
 
     // Test masks only when preparing a query literal, never inside the opcode loop.
-    uint64_t allowedNormal = UINT64_MAX, allowedOpposite = UINT64_MAX;
+    uint64_t allowedPositions = UINT64_MAX;
     size_t firstLInfo = 0;
     BindingArray bindings;
 
