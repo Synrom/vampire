@@ -82,6 +82,7 @@ private:
   private:
     void doEagerMatching();
 
+    bool seekOnlySuccess;
     Stack<CodeOp*> eagerResults;
 
     void recordMatch();

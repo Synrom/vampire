@@ -349,47 +349,48 @@ bool ClauseCodeTree::removeOneOfAlternatives(CodeOp* op, Clause* cl, Stack<CodeO
 ////////// LiteralMatcher
 
 /**
- * If @b seekOnlySuccess if true, we will look only for immediate SUCCESS operations
- *  and fail if there isn't any at the beginning (possibly also among alternatives).
+ * Initialize matching state without executing the code tree.
+ * If @b seekOnlySuccess is true, next() only considers immediate SUCCESS
+ * operations (including alternatives).
  */
 void ClauseCodeTree::LiteralMatcher::init(const CodeTree& tree_, CodeOp* entry_,
 					  LitInfo* linfos_, size_t linfoCnt_,
-					  bool seekOnlySuccess, LitInfoOccupation occupied)
+					  bool seekOnlySuccess_, LitInfoOccupation occupied)
 {
   ASS_G(linfoCnt_,0);
 
   Matcher::init(tree_,entry_,occupied,linfos_,linfoCnt_);
 
   eagerResults.reset();
+  seekOnlySuccess=seekOnlySuccess_;
 
   RSTAT_CTR_INC("LiteralMatcher::init");
-  if (!seekOnlySuccess && !prepareLiteral()) {
-    seekOnlySuccess = true;
-  }
-  firstLInfo = curLInfo;
-  if(seekOnlySuccess) {
-    RSTAT_CTR_INC("LiteralMatcher::init - seekOnlySuccess");
-    //we are interested only in SUCCESS operations
-    //(and those must be at the entry point or its alternatives)
-
-    fresh=false;
-    CodeOp* sop=entry;
-    while(sop) {
-      if(sop->isSuccess()) {
-        eagerResults.push(sop);
-      }
-      sop=sop->alternative();
-    }
-    return;
-  }
-  doEagerMatching();
 }
 
 /**
- * Try to find a match, and if one is found, return true
+ * On the first call, collect all matches before yielding a result.
+ * Subsequent calls consume the collected results.
  */
 bool ClauseCodeTree::LiteralMatcher::next()
 {
+  if(fresh) {
+    if (!seekOnlySuccess && !prepareLiteral()) {
+      seekOnlySuccess = true;
+    }
+    firstLInfo = curLInfo;
+    if(seekOnlySuccess) {
+      RSTAT_CTR_INC("LiteralMatcher::next - seekOnlySuccess");
+      // Only immediate SUCCESS operations (including alternatives) are eligible.
+      fresh=false;
+      for(CodeOp* sop=entry; sop; sop=sop->alternative()) {
+        if(sop->isSuccess()) {
+          eagerResults.push(sop);
+        }
+      }
+    } else {
+      doEagerMatching();
+    }
+  }
   _matched=!eagerResults.isEmpty();
   if(!_matched) {
     return false;
