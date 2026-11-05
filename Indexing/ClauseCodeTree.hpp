@@ -74,16 +74,13 @@ private:
   {
     void init(const CodeTree& tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess, LitInfoOccupation occupied);
     bool next();
-    bool doEagerMatching();
-
-    inline bool eagerlyMatched() const { return _eagerlyMatched; }
 
     inline ILStruct* getILS() { ASS(matched()); return op->getILS(); }
 
     USE_ALLOCATOR(LiteralMatcher);
 
   private:
-    bool _eagerlyMatched;
+    void doEagerMatching();
 
     Stack<CodeOp*> eagerResults;
 

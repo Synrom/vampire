@@ -360,7 +360,6 @@ void ClauseCodeTree::LiteralMatcher::init(const CodeTree& tree_, CodeOp* entry_,
 
   Matcher::init(tree_,entry_,occupied,linfos_,linfoCnt_);
 
-  _eagerlyMatched=false;
   eagerResults.reset();
 
   RSTAT_CTR_INC("LiteralMatcher::init");
@@ -373,7 +372,6 @@ void ClauseCodeTree::LiteralMatcher::init(const CodeTree& tree_, CodeOp* entry_,
     //we are interested only in SUCCESS operations
     //(and those must be at the entry point or its alternatives)
 
-    _eagerlyMatched=true;
     fresh=false;
     CodeOp* sop=entry;
     while(sop) {
@@ -384,6 +382,7 @@ void ClauseCodeTree::LiteralMatcher::init(const CodeTree& tree_, CodeOp* entry_,
     }
     return;
   }
+  doEagerMatching();
 }
 
 /**
@@ -391,50 +390,28 @@ void ClauseCodeTree::LiteralMatcher::init(const CodeTree& tree_, CodeOp* entry_,
  */
 bool ClauseCodeTree::LiteralMatcher::next()
 {
-  if(eagerlyMatched()) {
-    _matched=!eagerResults.isEmpty();
-    if(!_matched) {
-      return false;
-    }
-    op=eagerResults.pop();
-    return true;
-  }
-
-  if(finished()) {
-    //all possible matches are exhausted
-    return false;
-  }
-
-  _matched=execute();
+  _matched=!eagerResults.isEmpty();
   if(!_matched) {
     return false;
   }
-
-  ASS(op->isLitEnd() || op->isSuccess());
-  if(op->isLitEnd()) {
-    recordMatch();
-  }
+  op=eagerResults.pop();
   return true;
 }
 
 /**
- * Perform eager matching and return true iff new matches were found
+ * Collect all matches before exposing any results.
  */
-bool ClauseCodeTree::LiteralMatcher::doEagerMatching()
+void ClauseCodeTree::LiteralMatcher::doEagerMatching()
 {
-  ASS(!eagerlyMatched()); //eager matching can be done only once
   ASS(eagerResults.isEmpty());
   ASS(!finished());
-
-  //backup the current op
-  CodeOp* currOp=op;
 
   static Stack<CodeOp*> eagerResultsRevOrder;
   static Stack<CodeOp*> successes;
   eagerResultsRevOrder.reset();
   successes.reset();
 
-  while(execute()) {
+  while((_matched=execute())) {
     if(op->isLitEnd()) {
       recordMatch();
       eagerResultsRevOrder.push(op);
@@ -457,11 +434,6 @@ bool ClauseCodeTree::LiteralMatcher::doEagerMatching()
     eagerResults.push(successes.pop());
   }
 
-  _eagerlyMatched=true;
-
-  op=currOp; //restore the current op
-
-  return eagerResults.isNonEmpty();
 }
 
 void ClauseCodeTree::LiteralMatcher::recordMatch()
@@ -470,6 +442,7 @@ void ClauseCodeTree::LiteralMatcher::recordMatch()
 
   ILStruct* ils=op->getILS();
   ils->ensureFreshness(tree->_curTimeStamp);
+  ils->occupiedPositions=occupied;
   if(ils->finished) {
     //no need to record matches which we already know will not lead to anything
     return;
@@ -656,25 +629,8 @@ inline bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
   if(lms.size()>1) {
     //we have already matched and entered some index literals, so we
     //will check for compatibility of variable assignments
-    if(ils->varCnt && !lms.top()->eagerlyMatched()) {
-      lms.top()->doEagerMatching();
-      RSTAT_MST_INC("match count", lms.size()-1, lms.top()->getILS()->matchCnt);
-    }
-    LitInfoOccupation occupied;
     for(size_t ilIndex=0;ilIndex<lms.size()-1;ilIndex++) {
       ILStruct* prevILS=lms[ilIndex]->getILS();
-      if(prevILS->varCnt && !lms[ilIndex]->eagerlyMatched()) {
-	lms[ilIndex]->doEagerMatching();
-	RSTAT_MST_INC("match count", ilIndex, lms[ilIndex]->getILS()->matchCnt);
-      }
-
-      prevILS->occupiedPositions=occupied;
-      if(query->length()<=LitInfoOccupation::CAPACITY &&
-          lms[ilIndex]->eagerlyMatched() && prevILS->getMatchedPositions().isExclusive()) {
-        occupied.occupy(prevILS->getMatchedPositions());
-      }
-      ils->occupiedPositions=occupied;
-
       size_t matchIndex=ils->matchCnt;
       while(matchIndex!=0) {
         matchIndex--;
@@ -704,7 +660,7 @@ CodeTree::LitInfoOccupation ClauseCodeTree::ClauseMatcher::occupiedPositions()
     auto& lm=lms.top();
     ILStruct* ils=lm->getILS();
     occupied=ils->occupiedPositions;
-    if(lm->eagerlyMatched() && ils->getMatchedPositions().isExclusive()) {
+    if(ils->getMatchedPositions().isExclusive()) {
       occupied.occupy(ils->getMatchedPositions());
     }
   }
@@ -731,17 +687,6 @@ void ClauseCodeTree::ClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuc
     ASS_EQ(ils->timestamp,tree->_curTimeStamp);
     ASS(!ils->visited);
     ASS(!ils->finished);
-    // The compatibility pass may have completed previously lazy ancestors.
-    if(lms.size()==1) {
-      ils->occupiedPositions=LitInfoOccupation();
-    } else {
-      ILStruct* previous=lms[lms.size()-2]->getILS();
-      ils->occupiedPositions=previous->occupiedPositions;
-      if(query->length()<=LitInfoOccupation::CAPACITY &&
-          lms[lms.size()-2]->eagerlyMatched() && previous->getMatchedPositions().isExclusive()) {
-        ils->occupiedPositions.occupy(previous->getMatchedPositions());
-      }
-    }
     ils->visited=true;
   }
 
@@ -826,32 +771,12 @@ bool ClauseCodeTree::ClauseMatcher::checkCandidate(Clause* cl, int& resolvedQuer
   // Past this point we are no longer interpreting code-tree ops: the candidate's literals
   // have each been matched individually, and what remains is to find one combination of
   // those matches whose variable bindings agree -- a backtracking search over match
-  // vectors (doEagerMatching, then matchGlobalVars/compatible/existsCompatibleMatch),
+  // vectors (matchGlobalVars/compatible/existsCompatibleMatch),
   // the same kind of work MLMatcher does. Scoped here, above the clen<=1 early exit, so
   // it is entered once per multi-literal candidate and never for a unit one.
   TIME_TRACE("codetree multi-literal matching");
 
-  bool newMatches=false;
-  for(int i=clen-1;i>=0;i--) {
-    LiteralMatcher* lm = &*lms[i];
-    if(lm->eagerlyMatched()) {
-      break;
-    }
-    if(lm->getILS()->varCnt==0) {
-      //If the index term is ground, at most two literals can be matched on
-      //it (the second one is the opposite one in case we're performing the
-      //subsumption resolution) We are here, so we have matched one already,
-      //and we know that the query clause doesn't contain two equal or opposite
-      //literals (or else it would have been simplified by duplicate literal
-      //removal or by tautology deletion). Therefore we don't need to try
-      //matching the rest of the query clause.
-      continue;
-    }
-    newMatches|=lm->doEagerMatching();
-  }
-  (void)newMatches; // to prevent a warning
   return matchGlobalVars(resolvedQueryLit);
-//  return newMatches && matchGlobalVars(resolvedQueryLit);
 }
 
 bool ClauseCodeTree::ClauseMatcher::matchGlobalVars(int& resolvedQueryLit)
