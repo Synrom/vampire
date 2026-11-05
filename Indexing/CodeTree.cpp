@@ -249,11 +249,14 @@ void CodeTree::ILStruct::ensureFreshness(unsigned globalTimestamp)
     finished=false;
     noNonOppositeMatches=false;
     matchCnt=0;
+    matchedPositions=LitInfoOccupation();
+    occupiedPositions=LitInfoOccupation();
   }
 }
 
-void CodeTree::ILStruct::addMatch(unsigned liIndex, DArray<TermList>& bindingArray)
+void CodeTree::ILStruct::addMatch(unsigned liIndex, DArray<TermList>& bindingArray, const LitInfo* linfos)
 {
+  matchedPositions.occupy(linfos[liIndex]);
   if(matchCnt==matches.size()) {
     matches.expand(matchCnt ? (matchCnt*2) : 4);
     size_t newSize=matches.size();
@@ -277,12 +280,17 @@ void CodeTree::ILStruct::addMatch(unsigned liIndex, DArray<TermList>& bindingArr
  * to filter them by this function, the traversal should go from higher
  * indexes down to zero.
  */
-void CodeTree::ILStruct::deleteMatch(unsigned matchIndex)
+void CodeTree::ILStruct::deleteMatch(unsigned matchIndex, const LitInfo* linfos)
 {
   ASS_L(matchIndex, matchCnt);
 
   matchCnt--;
   swap(matches[matchIndex], matches[matchCnt]);
+  // Several matches may represent the same position (orientations/polarities).
+  matchedPositions=LitInfoOccupation();
+  for(unsigned i=0; i<matchCnt; i++) {
+    matchedPositions.occupy(linfos[matches[i]->liIndex]);
+  }
 }
 
 CodeTree::MatchInfo*& CodeTree::ILStruct::getMatch(unsigned matchIndex)

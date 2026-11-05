@@ -100,6 +100,47 @@ public:
   };
 
   /**
+   * A set of query literal positions.
+   * Positions outside CAPACITY are not represented.
+   */
+  struct LitInfoOccupation {
+    static constexpr unsigned CAPACITY = 64;
+
+    static LitInfoOccupation createEmptyOccupation()
+    {
+      return LitInfoOccupation();
+    }
+
+    inline void occupy(const LitInfo& linfo)
+    {
+      if (linfo.litIndex < CAPACITY) {
+        bitmask |= uint64_t{1} << linfo.litIndex;
+      }
+    }
+
+    inline bool isOccupied(const LitInfo& linfo) const
+    {
+      if (linfo.litIndex < CAPACITY) {
+        return bitmask & (uint64_t{1} << linfo.litIndex);
+      }
+      return false;
+    }
+
+    inline void occupy(LitInfoOccupation other)
+    {
+      bitmask |= other.bitmask;
+    }
+
+    inline bool isExclusive() const
+    {
+      return std::has_single_bit(bitmask);
+    }
+
+  private:
+    uint64_t bitmask = 0;
+  };
+
+  /**
    * Structure with information about an indexed literal
    */
   struct alignas(8) ILStruct
@@ -132,9 +173,12 @@ public:
     unsigned timestamp;
     //from here on, the values are valid only if the timestamp is current
 
-    void addMatch(unsigned liIndex, DArray<TermList>& bindingArray);
-    void deleteMatch(unsigned matchIndex);
+    void addMatch(unsigned liIndex, DArray<TermList>& bindingArray, const LitInfo* linfos);
+    void deleteMatch(unsigned matchIndex, const LitInfo* linfos);
     MatchInfo*& getMatch(unsigned matchIndex);
+    LitInfoOccupation getMatchedPositions() const { return matchedPositions; }
+    // Occupation contributed by completed matchers before this literal.
+    LitInfoOccupation occupiedPositions;
 
     unsigned matchCnt;
 
@@ -144,6 +188,7 @@ public:
     bool noNonOppositeMatches;
   private:
     DArray<MatchInfo*> matches;
+    LitInfoOccupation matchedPositions;
   };
 
   enum Instruction
@@ -304,47 +349,6 @@ public:
   typedef Vector<CodeOp> CodeBlock;
   typedef Stack<CodeOp> CodeStack;
   typedef DArray<TermList> BindingArray;
-
-  /**
-   * A set of query literal positions.
-   * Positions outside CAPACITY are not represented.
-   */
-  struct LitInfoOccupation {
-    static constexpr unsigned CAPACITY = 64;
-
-    static LitInfoOccupation createEmptyOccupation()
-    {
-      return LitInfoOccupation();
-    }
-
-    inline void occupy(const LitInfo& linfo)
-    {
-      if (linfo.litIndex < CAPACITY) {
-        bitmask |= uint64_t{1} << linfo.litIndex;
-      }
-    }
-
-    inline bool isOccupied(const LitInfo& linfo) const
-    {
-      if (linfo.litIndex < CAPACITY) {
-        return bitmask & (uint64_t{1} << linfo.litIndex);
-      }
-      return false;
-    }
-
-    inline void occupy(LitInfoOccupation other)
-    {
-      bitmask |= other.bitmask;
-    }
-
-    inline bool isExclusive() const
-    {
-      return std::has_single_bit(bitmask);
-    }
-
-  private:
-    uint64_t bitmask = 0;
-  };
 
   // This holds the parts relevant only for Matcher<true,...>
   struct RemovingBase {

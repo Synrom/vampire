@@ -478,7 +478,7 @@ void ClauseCodeTree::LiteralMatcher::recordMatch()
     //if we're matching opposite matches, we have already tried all non-opposite ones
     ils->noNonOppositeMatches=true;
   }
-  ils->addMatch(linfos[curLInfo].liIndex, bindings);
+  ils->addMatch(linfos[curLInfo].liIndex, bindings, linfos);
 }
 
 
@@ -660,6 +660,7 @@ inline bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
       lms.top()->doEagerMatching();
       RSTAT_MST_INC("match count", lms.size()-1, lms.top()->getILS()->matchCnt);
     }
+    LitInfoOccupation occupied;
     for(size_t ilIndex=0;ilIndex<lms.size()-1;ilIndex++) {
       ILStruct* prevILS=lms[ilIndex]->getILS();
       if(prevILS->varCnt && !lms[ilIndex]->eagerlyMatched()) {
@@ -667,12 +668,19 @@ inline bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
 	RSTAT_MST_INC("match count", ilIndex, lms[ilIndex]->getILS()->matchCnt);
       }
 
+      prevILS->occupiedPositions=occupied;
+      if(query->length()<=LitInfoOccupation::CAPACITY &&
+          lms[ilIndex]->eagerlyMatched() && prevILS->getMatchedPositions().isExclusive()) {
+        occupied.occupy(prevILS->getMatchedPositions());
+      }
+      ils->occupiedPositions=occupied;
+
       size_t matchIndex=ils->matchCnt;
       while(matchIndex!=0) {
         matchIndex--;
         MatchInfo* mi=ils->getMatch(matchIndex);
         if(!existsCompatibleMatch(ils, mi, prevILS)) {
-          ils->deleteMatch(matchIndex); //decreases ils->matchCnt
+          ils->deleteMatch(matchIndex, lInfos.array()); //decreases ils->matchCnt
         }
       }
       if(!ils->matchCnt) {
@@ -687,24 +695,17 @@ inline bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
 CodeTree::LitInfoOccupation ClauseCodeTree::ClauseMatcher::occupiedPositions()
 {
   LitInfoOccupation occupied;
-  // A truncated domain could falsely appear to contain just one position.
+  // Truncating the matched positions could falsely make the occupation exclusive.
   if(query->length() > LitInfoOccupation::CAPACITY) {
     return occupied;
   }
 
-  for(auto& lm : lms) {
-    // A lazy matcher may still discover other positions for this LIT_END.
-    if(!lm->eagerlyMatched()) {
-      continue;
-    }
+  if(lms.isNonEmpty()) {
+    auto& lm=lms.top();
     ILStruct* ils=lm->getILS();
-    LitInfoOccupation domain;
-    // Use surviving matches, coalescing equality orientations and polarities.
-    for(unsigned i=0; i<ils->matchCnt; i++) {
-      domain.occupy(lInfos[ils->getMatch(i)->liIndex]);
-    }
-    if(domain.isExclusive()) {
-      occupied.occupy(domain);
+    occupied=ils->occupiedPositions;
+    if(lm->eagerlyMatched() && ils->getMatchedPositions().isExclusive()) {
+      occupied.occupy(ils->getMatchedPositions());
     }
   }
   return occupied;
@@ -730,6 +731,17 @@ void ClauseCodeTree::ClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuc
     ASS_EQ(ils->timestamp,tree->_curTimeStamp);
     ASS(!ils->visited);
     ASS(!ils->finished);
+    // The compatibility pass may have completed previously lazy ancestors.
+    if(lms.size()==1) {
+      ils->occupiedPositions=LitInfoOccupation();
+    } else {
+      ILStruct* previous=lms[lms.size()-2]->getILS();
+      ils->occupiedPositions=previous->occupiedPositions;
+      if(query->length()<=LitInfoOccupation::CAPACITY &&
+          lms[lms.size()-2]->eagerlyMatched() && previous->getMatchedPositions().isExclusive()) {
+        ils->occupiedPositions.occupy(previous->getMatchedPositions());
+      }
+    }
     ils->visited=true;
   }
 
