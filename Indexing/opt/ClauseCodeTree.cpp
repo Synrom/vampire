@@ -312,7 +312,7 @@ void OptClauseCodeTree::remove(Clause* cl)
 void OptClauseCodeTree::RemovingLiteralMatcher::init(CodeOp* entry_, LitInfo* linfos_,
     size_t linfoCnt_, const OptClauseCodeTree& tree_, Stack<CodeOp*>* firstsInBlocks_)
 {
-  Matcher::init(tree_, entry_, linfos_, linfoCnt_, firstsInBlocks_);
+  Matcher::init(tree_, entry_, LitInfoOccupation::createEmptyOccupation(), linfos_, linfoCnt_, firstsInBlocks_);
 
   ALWAYS(prepareLiteral());
 }
@@ -348,16 +348,20 @@ bool OptClauseCodeTree::removeOneOfAlternatives(CodeOp* op, Clause* cl, Stack<Co
  */
 void OptClauseCodeTree::LiteralMatcher::init(const OptCodeTree& tree_, CodeOp* entry_,
 					  LitInfo* linfos_, size_t linfoCnt_,
-					  bool seekOnlySuccess)
+					  bool seekOnlySuccess, LitInfoOccupation occupied)
 {
   ASS_G(linfoCnt_,0);
 
-  Matcher::init(tree_,entry_,linfos_,linfoCnt_);
+  Matcher::init(tree_,entry_,occupied,linfos_,linfoCnt_);
 
   _eagerlyMatched=false;
   eagerResults.reset();
 
   RSTAT_CTR_INC("LiteralMatcher::init");
+  if (!seekOnlySuccess && !prepareLiteral()) {
+    seekOnlySuccess = true;
+  }
+  firstLInfo = curLInfo;
   if(seekOnlySuccess) {
     RSTAT_CTR_INC("LiteralMatcher::init - seekOnlySuccess");
     //we are interested only in SUCCESS operations
@@ -375,8 +379,6 @@ void OptClauseCodeTree::LiteralMatcher::init(const OptCodeTree& tree_, CodeOp* e
     }
     return;
   }
-
-  ALWAYS(prepareLiteral());
 }
 
 /**
@@ -555,7 +557,7 @@ void OptClauseCodeTree::ClauseMatcher::init(OptClauseCodeTree* tree_, Clause* qu
   if (ordering) for (unsigned i=0; i<signedLits.size(); ++i)
     for (unsigned j=0; j<signedLits.size(); ++j)
       queryOrder[i][j] = ordering->compare(signedLits[i], signedLits[j]);
-  tree->allowLiteral = [this](const OrderConstraints& c, unsigned li) { return allowLiteral(c, li); };
+  tree->allowLiteral = [this](const OrderConstraints& c, unsigned li, bool atEntry) { return allowLiteral(c, li, atEntry); };
   tree->incTimeStamp();
   enterLiteral(tree->getEntryPoint(), clen==0);
 }
@@ -639,21 +641,36 @@ unsigned OptClauseCodeTree::ClauseMatcher::signedIndex(unsigned li) const
   return lInfos[li].litIndex + (lInfos[li].opposite ? query->length() : 0);
 }
 
-bool OptClauseCodeTree::ClauseMatcher::allowLiteral(const OrderConstraints& c, unsigned li)
+bool OptClauseCodeTree::ClauseMatcher::allowLiteral(const OrderConstraints& c, unsigned li, bool atEntry)
 {
-  if (c.previous.empty() && !c.below && !c.above) return true;
+  auto record=[&](uint64_t& all, uint64_t& entry) {
+    ++all;
+    if (atEntry) {
+      ++entry;
+      if (c.previous.empty()) ++OrderExperiment::rootEntryPrunes;
+    }
+  };
+  const auto& cfg=OrderExperiment::config();
+  const unsigned requiredBelow=cfg.capacity && cfg.variant!="no_below" ? c.below : 0;
+  const unsigned requiredAbove=cfg.capacity && cfg.variant!="no_above" ? c.above : 0;
+  if (!cfg.ordering && !cfg.capacity) return true;
+  if (c.previous.empty() && !requiredBelow && !requiredAbove) return true;
   const unsigned n=query->length(), q=signedIndex(li), candidate=lInfos[li].litIndex;
   std::vector<bool> occupied(n, false);
   occupied[candidate]=true;
   // Complete a lazy domain only when an ordering constraint actually needs it.
   // Reentrant eager matching only consults earlier levels, so recursion terminates.
   for (unsigned i=0; i<c.previous.size(); ++i) {
-    if (!c.previous[i] && !c.below && !c.above) continue;
-    if (c.previous[i] && !lms[i]->eagerlyMatched() && !lms[i]->finished())
+    auto relation=c.previous[i];
+    if (!cfg.ordering || (!cfg.both && relation==Ordering::LESS) ||
+        ((cfg.variant=="less" || cfg.variant=="no_greater") && relation==Ordering::GREATER) ||
+        (cfg.variant=="no_less" && relation==Ordering::LESS)) relation=0;
+    if (!relation && !requiredBelow && !requiredAbove) continue;
+    if (relation && !lms[i]->eagerlyMatched() && !lms[i]->finished())
       lms[i]->doEagerMatching();
     if (!lms[i]->eagerlyMatched()) continue;
     auto ils=lms[i]->getILS();
-    bool supported=false;
+    bool supported=false, distinctSupport=false;
     unsigned forced=n;
     bool first=true, unique=true;
     for (unsigned j=0; j<ils->matchCnt; ++j) {
@@ -661,10 +678,20 @@ bool OptClauseCodeTree::ClauseMatcher::allowLiteral(const OrderConstraints& c, u
       unsigned v=lInfos[prev].litIndex;
       if (first) { forced=v; first=false; }
       else if (forced!=v) unique=false;
-      if (v!=candidate && !(lInfos[prev].opposite && lInfos[li].opposite) &&
-          (!c.previous[i] || queryOrder[q][signedIndex(prev)]==c.previous[i])) supported=true;
+      if (v!=candidate && !(lInfos[prev].opposite && lInfos[li].opposite)) {
+        distinctSupport=true;
+        if (!relation || queryOrder[q][signedIndex(prev)]==relation) supported=true;
+      }
     }
-    if (!supported) { ++OrderExperiment::previousPrunes; return false; }
+    if (!supported) {
+      ++OrderExperiment::previousPrunes;
+      // First failing earlier domain: categories are disjoint, in index order.
+      if (!distinctSupport) record(OrderExperiment::supportPrunes, OrderExperiment::entryPrunes.support);
+      else if (relation==Ordering::GREATER) record(OrderExperiment::greaterPrunes, OrderExperiment::entryPrunes.greater);
+      else if (relation==Ordering::LESS) record(OrderExperiment::lessPrunes, OrderExperiment::entryPrunes.less);
+      else record(OrderExperiment::supportPrunes, OrderExperiment::entryPrunes.support);
+      return false;
+    }
     if (!first && unique) occupied[forced]=true;
   }
   // Count distinct query literals, never equality orientations or both polarities.
@@ -681,8 +708,15 @@ bool OptClauseCodeTree::ClauseMatcher::allowLiteral(const OrderConstraints& c, u
     below+=lo; above+=hi; either+=lo||hi;
   }
   // The union bound also covers overlapping polarity domains.
-  bool allowed=below>=c.below && above>=c.above && either>=c.below+c.above;
-  if (!allowed) ++OrderExperiment::capacityPrunes;
+  bool low=below<requiredBelow, high=above<requiredAbove;
+  bool allowed=!low && !high && either>=requiredBelow+requiredAbove;
+  if (!allowed) {
+    ++OrderExperiment::capacityPrunes;
+    if (low && high) record(OrderExperiment::bothCapacityPrunes, OrderExperiment::entryPrunes.both);
+    else if (low) record(OrderExperiment::belowPrunes, OrderExperiment::entryPrunes.below);
+    else if (high) record(OrderExperiment::abovePrunes, OrderExperiment::entryPrunes.above);
+    else record(OrderExperiment::unionPrunes, OrderExperiment::entryPrunes.unionOnly);
+  }
   return allowed;
 }
 
@@ -712,11 +746,11 @@ inline bool OptClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
 
       size_t matchIndex=ils->matchCnt;
       while(matchIndex!=0) {
-	matchIndex--;
-	MatchInfo* mi=ils->getMatch(matchIndex);
-	if(!existsCompatibleMatch(ils, mi, prevILS)) {
-	  ils->deleteMatch(matchIndex); //decreases ils->matchCnt
-	}
+        matchIndex--;
+        MatchInfo* mi=ils->getMatch(matchIndex);
+        if(!existsCompatibleMatch(ils, mi, prevILS)) {
+          ils->deleteMatch(matchIndex); //decreases ils->matchCnt
+        }
       }
       if(!ils->matchCnt) {
 	return false;
@@ -725,6 +759,32 @@ inline bool OptClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
   }
 
   return true;
+}
+
+OptCodeTree::LitInfoOccupation OptClauseCodeTree::ClauseMatcher::occupiedPositions()
+{
+  LitInfoOccupation occupied;
+  // A truncated domain could falsely appear to contain just one position.
+  if(!OrderExperiment::config().used || query->length() > LitInfoOccupation::CAPACITY) {
+    return occupied;
+  }
+
+  for(auto& lm : lms) {
+    // A lazy matcher may still discover other positions for this LIT_END.
+    if(!lm->eagerlyMatched()) {
+      continue;
+    }
+    ILStruct* ils=lm->getILS();
+    LitInfoOccupation domain;
+    // Use surviving matches, coalescing equality orientations and polarities.
+    for(unsigned i=0; i<ils->matchCnt; i++) {
+      domain.occupy(lInfos[ils->getMatch(i)->liIndex]);
+    }
+    if(domain.isExclusive()) {
+      occupied.occupy(domain);
+    }
+  }
+  return occupied;
 }
 
 /**
@@ -762,7 +822,9 @@ void OptClauseCodeTree::ClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnly
   }
 
   Recycled<LiteralMatcher, NoReset> lm;
-  lm->init(*tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess);
+  // Derive occupancy from the active LIT_ENDs
+  LitInfoOccupation occupied=seekOnlySuccess ? LitInfoOccupation() : occupiedPositions();
+  lm->init(*tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess, occupied);
   lms.push(std::move(lm));
 }
 

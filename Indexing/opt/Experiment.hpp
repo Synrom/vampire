@@ -27,7 +27,23 @@ inline uint64_t now() {
       std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 inline uint64_t queries=0, masterOps=0, optimizedOps=0, masterHits=0, optimizedHits=0;
-inline uint64_t previousPrunes=0, capacityPrunes=0; // compatibility with archived prototype
+// Rejection events, not saved CodeOps or globally distinct query literals.
+// Each failed allowLiteral rejects the current query-LitInfo/branch continuation;
+// accepted checks do not increment these counters. A prefix may already be matched.
+// Occupancy counts LitInfo attempts skipped before entering the literal matcher.
+inline uint64_t greaterPrunes=0, lessPrunes=0, supportPrunes=0, occupancySkipped=0;
+inline uint64_t belowPrunes=0, abovePrunes=0, bothCapacityPrunes=0, unionPrunes=0;
+// Strict entry means op == Matcher::entry: the root or LIT_END+1.
+// Alternatives and search-structure targets are not additional entry points.
+// This is an observational subset of the usual rejections, not a separate run
+// whose domain completion and traversal might differ under entry-only pruning.
+struct EntryPruneCounts {
+  uint64_t greater=0, less=0, support=0, below=0, above=0, both=0, unionOnly=0;
+  uint64_t total() const { return greater+less+support+below+above+both+unionOnly; }
+};
+inline EntryPruneCounts entryPrunes;
+inline uint64_t rootEntryPrunes=0;
+inline uint64_t previousPrunes=0, capacityPrunes=0; // totals for the two constraint families
 inline uint64_t differentResults=0, mismatches=0;
 inline uint64_t masterNs=0, optimizedNs=0, masterIndexNs=0, optimizedIndexNs=0;
 inline uint64_t terminalShortcuts=0;
@@ -53,6 +69,31 @@ inline void print(std::ostream& out) {
       << " optimized_index_ns=" << optimizedIndexNs << " query_comparisons=" << queryComparisons
       << " insertion_comparisons=" << insertionComparisons
       << " terminal_shortcuts=" << terminalShortcuts << " domain_builds=" << domainBuilds << " support_builds=" << supportBuilds << '\n';
+  out << "% Order causes: greater=" << greaterPrunes << " less=" << lessPrunes
+      << " support=" << supportPrunes << " occupancy_skipped=" << occupancySkipped
+      << " depth_below_only=" << belowPrunes << " depth_above_only=" << abovePrunes
+      << " depth_both=" << bothCapacityPrunes << " depth_union_only=" << unionPrunes << '\n';
+  const uint64_t totalPrunes=greaterPrunes+lessPrunes+supportPrunes+occupancySkipped+
+      belowPrunes+abovePrunes+bothCapacityPrunes+unionPrunes;
+  auto percent=[](uint64_t part, uint64_t total) { return total ? 100.0*part/total : 0.0; };
+  out << "% Order shares: total=" << totalPrunes
+      << " greater_pct=" << percent(greaterPrunes,totalPrunes)
+      << " less_pct=" << percent(lessPrunes,totalPrunes)
+      << " support_pct=" << percent(supportPrunes,totalPrunes)
+      << " occupancy_pct=" << percent(occupancySkipped,totalPrunes)
+      << " depth_below_pct=" << percent(belowPrunes,totalPrunes)
+      << " depth_above_pct=" << percent(abovePrunes,totalPrunes)
+      << " depth_both_pct=" << percent(bothCapacityPrunes,totalPrunes)
+      << " depth_union_pct=" << percent(unionPrunes,totalPrunes) << '\n';
+  out << "% Order entry causes: greater=" << entryPrunes.greater
+      << " less=" << entryPrunes.less << " support=" << entryPrunes.support
+      << " depth_below_only=" << entryPrunes.below << " depth_above_only=" << entryPrunes.above
+      << " depth_both=" << entryPrunes.both << " depth_union_only=" << entryPrunes.unionOnly
+      << " total=" << entryPrunes.total() << " root=" << rootEntryPrunes
+      << " checks_retained_pct=" << percent(entryPrunes.total(),totalPrunes-occupancySkipped)
+      << " occupancy_retained=" << occupancySkipped
+      << " total_with_occupancy=" << entryPrunes.total()+occupancySkipped
+      << " retained_pct=" << percent(entryPrunes.total()+occupancySkipped,totalPrunes) << '\n';
   out << "% Order layout: base_op=" << baseOpBytes << " opt_op=" << optOpBytes
       << " base_il=" << baseILBytes << " opt_il=" << optILBytes << '\n';
   for (unsigned i=0; i<65; ++i) {

@@ -22,7 +22,7 @@
 #include "LiteralCodeTree.hpp"
 #include "TermCodeTree.hpp"
 #include "ClauseCodeTree.hpp"
-#include "opt/bitset/ClauseCodeTree.hpp"
+#include "opt/ClauseCodeTree.hpp"
 #include "opt/Experiment.hpp"
 
 #include "Index.hpp"
@@ -176,14 +176,13 @@ class CodeTreeSubsumptionIndex
 {
 public:
   CodeTreeSubsumptionIndex(SaturationAlgorithm&) {
-    static_assert(sizeof(CodeTree::CodeOp)==sizeof(BitsetCodeTree::CodeOp));
     OrderExperiment::baseOpBytes=sizeof(CodeTree::CodeOp);
-    OrderExperiment::optOpBytes=sizeof(BitsetCodeTree::CodeOp);
+    OrderExperiment::optOpBytes=sizeof(OptCodeTree::CodeOp);
     OrderExperiment::baseILBytes=sizeof(CodeTree::ILStruct);
-    OrderExperiment::optILBytes=sizeof(BitsetCodeTree::ILStruct);
+    OrderExperiment::optILBytes=sizeof(OptCodeTree::ILStruct);
   }
   ClauseCodeTree* getClauseCodeTree() { return &_ct; }
-  BitsetClauseCodeTree* getOptimizedClauseCodeTree() { return &_optimized; }
+  OptClauseCodeTree* getOptimizedClauseCodeTree() { return &_optimized; }
 protected:
   void handleClause(Clause* c, bool adding) override {
     TIME_TRACE("codetree subsumption index maintenance");
@@ -202,7 +201,7 @@ protected:
   }
 private:
   ClauseCodeTree _ct;
-  BitsetClauseCodeTree _optimized;
+  OptClauseCodeTree _optimized;
 };
 
 };

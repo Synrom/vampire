@@ -25,6 +25,7 @@
 #include "Kernel/TermIterators.hpp"
 
 #include "CodeTree.hpp"
+#include "Experiment.hpp"
 
 #define ISATTY 1
 #if ISATTY
@@ -578,7 +579,7 @@ bool OptCodeTree::Matcher<removing, checkRange>::execute()
     }
     if constexpr (!removing) {
       if (op->orderConstraints && tree->allowLiteral &&
-          !tree->allowLiteral(*op->orderConstraints, curLInfo)) {
+          !tree->allowLiteral(*op->orderConstraints, curLInfo, op==entry)) {
         if (!backtrack()) return false;
         continue;
       }
@@ -602,7 +603,7 @@ bool OptCodeTree::Matcher<removing, checkRange>::execute()
         } else {
           //yield successes only in the first round (we don't want to yield the
           //same thing for each query literal)
-          if(curLInfo==0) {
+          if(curLInfo==firstLInfo) {
             return true;
           }
           else {
@@ -658,10 +659,11 @@ bool OptCodeTree::Matcher<removing, checkRange>::execute()
 }
 
 template<bool removing, bool checkRange>
-void OptCodeTree::Matcher<removing, checkRange>::init(const OptCodeTree& tree_, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, Stack<CodeOp*>* firstsInBlocks_)
+void OptCodeTree::Matcher<removing, checkRange>::init(const OptCodeTree& tree_, CodeOp* entry_, LitInfoOccupation occupied_, LitInfo* linfos_, size_t linfoCnt_, Stack<CodeOp*>* firstsInBlocks_)
 {
   tree=&tree_;
   entry=entry_;
+  occupied = occupied_;
 
   linfos=linfos_;
   linfoCnt=linfoCnt_;
@@ -675,6 +677,7 @@ void OptCodeTree::Matcher<removing, checkRange>::init(const OptCodeTree& tree_, 
   fresh=true;
   _matched=false;
   curLInfo=0;
+  firstLInfo=0;
 
   bindings.ensure(tree->_maxVarCnt);
   btStack.reset();
@@ -709,6 +712,10 @@ bool OptCodeTree::Matcher<removing, checkRange>::prepareLiteral()
 {
   if constexpr (removing) {
     RemovingBase::firstsInBlocks->truncate(RemovingBase::initFIBDepth);
+  }
+  while (curLInfo < linfoCnt && occupied.isOccupied(linfos[curLInfo])) {
+    if constexpr (!removing) ++OrderExperiment::occupancySkipped;
+    curLInfo++;
   }
   if(curLInfo>=linfoCnt) {
     return false;

@@ -44,7 +44,7 @@ bool CodeTreeForwardSubsumptionAndResolution::perform(Clause *cl, Clause *&repla
   if (cfg.run=="optimized" ? optTree->isEmpty() : _ct->isEmpty()) return false;
 
   static ClauseCodeTree::ClauseMatcher cm;
-  static Indexing::BitsetClauseCodeTree::ClauseMatcher optimized;
+  static Indexing::OptClauseCodeTree::ClauseMatcher optimized;
   int resolvedQueryLit=-1, optimizedResolved=-1;
   Clause* premise=nullptr;
   Clause* optimizedPremise=nullptr;
@@ -88,6 +88,16 @@ bool CodeTreeForwardSubsumptionAndResolution::perform(Clause *cl, Clause *&repla
         satSubs.checkSubsumptionResolutionWithLiteral(optimizedPremise,cl,optimizedResolved)));
   }
   if (cfg.run=="optimized") { premise=optimizedPremise; resolvedQueryLit=optimizedResolved; }
+
+  // Optional fixed-query checkpoints make timed-out ablations comparable.
+  static const uint64_t checkpoint=[] {
+    auto value=std::getenv("CT_ORDER_CHECKPOINT");
+    return value ? std::strtoull(value,nullptr,10) : 0ULL;
+  }();
+  if (checkpoint && queries%checkpoint==0) {
+    print(std::cout);
+    std::cout.flush();
+  }
 
   if (premise) {
     if (resolvedQueryLit == -1) {

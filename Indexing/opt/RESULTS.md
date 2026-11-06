@@ -1,4 +1,4 @@
-> Historical per-CodeOp experiment. The active, much smaller implementation and new comparisons are in [bitset/](bitset/README.md).
+> Historical measurements before the occupancy port. Current measurements are in [results/occupancy/RESULTS.md](results/occupancy/RESULTS.md).
 
 # Results: order-preserving code-tree pruning
 

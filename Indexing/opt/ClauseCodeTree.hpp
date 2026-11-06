@@ -72,7 +72,7 @@ private:
   struct LiteralMatcher
   : public Matcher</*removing*/false,false>
   {
-    void init(const OptCodeTree& tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess=false);
+    void init(const OptCodeTree& tree, CodeOp* entry_, LitInfo* linfos_, size_t linfoCnt_, bool seekOnlySuccess, LitInfoOccupation occupied);
     bool next();
     bool doEagerMatching();
 
@@ -106,7 +106,8 @@ public:
     USE_ALLOCATOR(ClauseMatcher);
 
   private:
-    bool allowLiteral(const OrderConstraints& constraints, unsigned li);
+    LitInfoOccupation occupiedPositions();
+    bool allowLiteral(const OrderConstraints& constraints, unsigned li, bool atEntry);
     std::vector<std::vector<unsigned char>> queryOrder;
     unsigned signedIndex(unsigned li) const;
     void enterLiteral(CodeOp* entry, bool seekOnlySuccess);

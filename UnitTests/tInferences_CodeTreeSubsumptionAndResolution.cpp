@@ -336,18 +336,18 @@ TEST_SIMPLIFICATION(order_pruning_multi_literal_domains,
     .expected({})
 )
 
-// Differential coverage for boundary masks, opposite polarity, equality orientation,
+// Differential coverage for ordering and occupancy, opposite polarity, equality orientation,
 // prefix sharing, and removal. Each variant is selected in a separate test process.
-TEST_FUN(bitset_boundary_differential)
+TEST_FUN(order_occupancy_differential)
 {
   MY_SYNTAX_SUGAR
   Problem problem;
   resetAndFillEnvOptions(OptionMap{}, problem);
   MockedSaturationAlgorithm alg(problem, *env.options);
   Indexing::ClauseCodeTree baseline;
-  Indexing::BitsetClauseCodeTree optimized;
+  Indexing::OptClauseCodeTree optimized;
   Indexing::ClauseCodeTree::ClauseMatcher cm;
-  Indexing::BitsetClauseCodeTree::ClauseMatcher bm;
+  Indexing::OptClauseCodeTree::ClauseMatcher bm;
   std::vector<Lit> pool={p(x), p(f(x)), p(f(f(x))), ~p(x), ~p(g(y)),
       q(x), q(g(y)), ~q(f(x)), f(x)==g(y), g(y)==f(x), f(x)!=g(y),
       p(c), p(f(c)), ~p(d), q(d), f(c)==g(d)};
@@ -358,12 +358,15 @@ TEST_FUN(bitset_boundary_differential)
     for (unsigned i=0; i<length; ++i) lits.push(pool[random()%pool.size()]);
     return clause(std::move(lits));
   };
+  SATSubsumption::SATSubsumptionAndResolution validator;
   auto compare=[&](Clause* query) {
     for (bool resolution : {false,true}) {
       cm.init(&baseline,query,resolution); bm.init(&optimized,query,resolution);
       int a=-1,b=-1;
       auto expected=cm.next(a); auto actual=bm.next(b);
-      ASS(!expected || actual);
+      ALWAYS(!expected || actual);
+      ALWAYS(!actual || (b==-1 ? validator.checkSubsumption(actual,query) :
+          validator.checkSubsumptionResolutionWithLiteral(actual,query,b)));
       cm.reset(); bm.reset();
     }
   };
@@ -381,14 +384,14 @@ TEST_FUN(bitset_boundary_differential)
   Ordering::unsetGlobalOrdering();
 }
 
-TEST_FUN(bitset_boundary_sizes)
+TEST_FUN(order_occupancy_sizes)
 {
   MY_SYNTAX_SUGAR
   Problem problem;
   resetAndFillEnvOptions(OptionMap{}, problem);
   MockedSaturationAlgorithm alg(problem, *env.options);
   Indexing::ClauseCodeTree baseline;
-  Indexing::BitsetClauseCodeTree optimized;
+  Indexing::OptClauseCodeTree optimized;
   auto indexed=clause({p(f(f(x))),p(f(x)),p(x)});
   baseline.insert(indexed); optimized.insert(indexed);
   for (unsigned length : {3u,63u,64u,65u}) {
@@ -397,11 +400,59 @@ TEST_FUN(bitset_boundary_sizes)
     for (unsigned i=0; i<length; ++i) { lits.push(p(term)); term=f(term); }
     auto query=clause(std::move(lits));
     Indexing::ClauseCodeTree::ClauseMatcher cm;
-    Indexing::BitsetClauseCodeTree::ClauseMatcher bm;
+    Indexing::OptClauseCodeTree::ClauseMatcher bm;
     cm.init(&baseline,query,true); bm.init(&optimized,query,true);
     int a=-1,b=-1;
-    ASS(cm.next(a)); ASS(bm.next(b));
+    ALWAYS(cm.next(a)); ALWAYS(bm.next(b));
     cm.reset(); bm.reset();
   }
+  Ordering::unsetGlobalOrdering();
+}
+
+// Distinguish a rejection at the root from one after a shared prefix whose
+// constraints were weakened by insertion of a shorter clause.
+TEST_FUN(order_entry_rejection_statistics)
+{
+  using namespace Indexing::OrderExperiment;
+  if (config().variant!="full") return;
+  MY_SYNTAX_SUGAR
+  Problem problem;
+  resetAndFillEnvOptions(OptionMap{}, problem);
+  MockedSaturationAlgorithm alg(problem, *env.options);
+  Indexing::OptClauseCodeTree tree;
+  tree.insert(clause({p(f(x)),p(x)}));
+  auto query=clause({p(c)});
+  Indexing::OptClauseCodeTree::ClauseMatcher matcher;
+  auto run=[&] {
+    matcher.init(&tree,query,false);
+    int resolved=-1;
+    ALWAYS(!matcher.next(resolved));
+    matcher.reset();
+  };
+  auto entries=entryPrunes.total(), roots=rootEntryPrunes, below=belowPrunes;
+  run();
+  ASS_G(entryPrunes.total(),entries);
+  ASS_EQ(entryPrunes.total()-entries,rootEntryPrunes-roots);
+  ASS_G(belowPrunes,below);
+
+  tree.insert(clause({p(g(x))}));
+  entries=entryPrunes.total(); roots=rootEntryPrunes; below=belowPrunes;
+  run();
+  ASS_G(belowPrunes,below);
+  ASS_EQ(entryPrunes.total(),entries);
+  ASS_EQ(rootEntryPrunes,roots);
+
+  // The next literal's entry must be recognized independently of the root.
+  bool sawPostLitEndEntry=false;
+  matcher.init(&tree,clause({p(f(c)),p(c)}),false);
+  auto check=tree.allowLiteral;
+  tree.allowLiteral=[&](const Indexing::OptCodeTree::OrderConstraints& c, unsigned li, bool atEntry) {
+    sawPostLitEndEntry |= atEntry && !c.previous.empty();
+    return check(c,li,atEntry);
+  };
+  int resolved=-1;
+  ALWAYS(matcher.next(resolved));
+  matcher.reset();
+  ASS(sawPostLitEndEntry);
   Ordering::unsetGlobalOrdering();
 }

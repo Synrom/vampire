@@ -6,16 +6,20 @@
 
 namespace Indexing::OrderExperiment {
 Config::Config() {
-  auto v=std::getenv("CT_ORDER_VARIANT"); variant=v ? v : "cheap";
+  auto v=std::getenv("CT_ORDER_VARIANT"); variant=v ? v : "full";
   auto r=std::getenv("CT_ORDER_RUN"); run=r ? r : "paired";
   if (variant=="off") {}
   else if (variant=="used") used=true;
   else if (variant=="greater") ordering=true;
+  else if (variant=="less") ordering=both=true;
   else if (variant=="both") ordering=both=true;
   else if (variant=="eager") ordering=eager=true;
   else if (variant=="capacity") ordering=capacity=true;
   else if (variant=="hybrid") ordering=used=true;
   else if (variant=="full") ordering=both=eager=capacity=used=true;
+  else if (variant=="no_greater" || variant=="no_less" || variant=="no_above" || variant=="no_below") ordering=both=eager=capacity=used=true;
+  else if (variant=="no_depth") ordering=both=eager=used=true;
+  else if (variant=="no_occupancy") ordering=both=eager=capacity=true;
   else if (variant=="cached_used") used=cache=true;
   else if (variant=="cached_greater") ordering=used=cache=true;
   else if (variant=="cached_both") ordering=both=used=cache=true;

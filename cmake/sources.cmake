@@ -177,8 +177,8 @@ set(SOURCES
     Indexing/ClauseVariantIndex.cpp
     Indexing/ClauseVariantIndex.hpp
     Indexing/opt/Experiment.cpp
-    Indexing/opt/bitset/CodeTree.cpp
-    Indexing/opt/bitset/ClauseCodeTree.cpp
+    Indexing/opt/CodeTree.cpp
+    Indexing/opt/ClauseCodeTree.cpp
     Indexing/CodeTree.cpp
     Indexing/CodeTree.hpp
     Indexing/CodeTreeInterfaces.hpp

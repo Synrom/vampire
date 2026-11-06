@@ -1,4 +1,70 @@
-> Historical per-CodeOp experiment. The active, much smaller implementation and new comparisons are in [bitset/](bitset/README.md).
+> The active experiment uses these per-CodeOp files with occupancy pruning ported
+> from `optimization/code-tree-literal-occupancy`. The alternative bitset
+> implementation remains in [bitset/](bitset/README.md), but is not built here.
+
+## Occupancy and attribution experiment
+
+The default is `CT_ORDER_VARIANT=full`, `CT_ORDER_RUN=paired`. `perform` runs
+both matchers on each query, alternates their execution order, and uses the
+baseline result to drive saturation. `CT_ORDER_RUN=optimized` runs only the new
+tree; `baseline` runs only the branch's baseline tree. A separate checkout of
+local master is needed to measure actual master wall time.
+
+Occupancy is derived from complete earlier match domains at literal entry.
+Equality orientations and polarities share a query position. Positions exclusively
+required by an earlier literal are skipped in `prepareLiteral`. Clauses exceeding
+64 literals disable this bitset optimization, without disabling order pruning.
+The first executed position is remembered so SUCCESS still gets returned once
+when position zero was skipped, including when all positions are occupied.
+
+The reproduction driver is `results/occupancy/run.py`. Run `--mode standalone`
+for actual master and optimized end-to-end runs (use `--master` to select a
+master binary), or `--mode prefix` for all seven paired variants on the first
+100,000 queries. The latter sets `CT_ORDER_CHECKPOINT=100000` and deliberately
+sends SIGTERM after the checkpoint; its exit code 3 is expected, not a mismatch.
+Use `--prefix-queries` to change that horizon. Checkpoints also work in ordinary
+90-second runs without stopping the process. See
+[the measured results](results/occupancy/RESULTS.md).
+
+For ablation, use `no_greater`, `no_less`, `no_depth`, `no_above`, `no_below`, or
+`no_occupancy`. Each disables the named component of `full`. Disabling occupancy
+only disables early skipping; the order check still rejects unsupported images
+and excludes forced positions from depth counts. Compare completed paired runs
+on identical baseline trajectories. Marginal savings need not add up: checks
+interact, and eager completion can itself execute additional instructions.
+
+`Order shares` additionally reports percentages of all rejection events, including
+occupancy skips, with `total` as the denominator (zero for empty totals).
+`Order entry causes` records the subset rejected at exactly `Matcher::entry`:
+the tree root or the CodeOp immediately following a `LIT_END`. Alternatives and
+search-structure targets do not qualify just because no query symbols have been
+consumed. Per-cause counts and the root subset are reported. `checks_retained_pct`
+uses non-occupancy rejections as its denominator; `retained_pct` adds the occupancy
+skips to numerator and denominator, since that optimization already acts at entry.
+These are observations on the unchanged full-pruning traversal, not a simulation
+of the possibly different traversal/domain completion of an entry-only matcher.
+
+`Order causes` reports rejection visits, not saved CodeOps. Earlier-domain
+failures are charged to the first failing domain, separating direction failures
+from absence of a distinct, polarity-compatible image (`support`). Depth
+failures are disjoint: below-only, above-only, both, and union-only. Earlier
+failures short-circuit depth checking. `occupancy_skipped` counts skipped LitInfo
+records, so orientations/polarities can count separately. On timeout, diagnostic
+counters can include the interrupted query, whereas CodeOps aggregate only
+completed queries.
+
+Build and test with:
+
+```sh
+cmake -S . -B build-order-occupancy -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_Z3=ON
+cmake --build build-order-occupancy --target vampire -j 8
+cmake -S . -B build-order-occupancy-debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_DISABLE_FIND_PACKAGE_Z3=ON
+cmake --build build-order-occupancy-debug --target vtest -j 8
+build-order-occupancy-debug/vtest run Inferences_CodeTreeSubsumptionAndResolution
+ln -s build-order-occupancy/vampire vampire
+CT_ORDER_RUN=paired CT_ORDER_VARIANT=full ./vampire -sa discount --time_limit 90 ~/Development/AutomatedDeduction/problems/condensed_detachment_4.p
+```
+
 
 # Order-preserving code-tree experiment
 

@@ -15,6 +15,7 @@
 #ifndef __OptCodeTree__
 #define __OptCodeTree__
 
+#include <bit>
 #include "Forwards.hpp"
 #include <memory>
 #include <functional>
@@ -163,12 +164,13 @@ public:
 
   /** Structure containing a single instruction and its arguments */
   // Necessary constraints common to every indexed clause sharing this op.
-  // previous[i] compares the current literal with indexed literal i (0 = unknown).
+  // previous[i] is LESS or GREATER for current versus earlier indexed literal i;
+  // 0 means no constraint. Shared paths retain only identical directions.
   struct OrderConstraints {
     std::vector<unsigned char> previous;
     unsigned below = 0, above = 0;
   };
-  mutable std::function<bool(const OrderConstraints&, unsigned)> allowLiteral;
+  mutable std::function<bool(const OrderConstraints&, unsigned, bool)> allowLiteral;
   struct CodeOp
   {
     std::shared_ptr<OrderConstraints> orderConstraints;
@@ -316,6 +318,47 @@ public:
   typedef Stack<CodeOp> CodeStack;
   typedef DArray<TermList> BindingArray;
 
+  /**
+   * A set of query literal positions.
+   * Positions outside CAPACITY are not represented.
+   */
+  struct LitInfoOccupation {
+    static constexpr unsigned CAPACITY = 64;
+
+    static LitInfoOccupation createEmptyOccupation()
+    {
+      return LitInfoOccupation();
+    }
+
+    inline void occupy(const LitInfo& linfo)
+    {
+      if (linfo.litIndex < CAPACITY) {
+        bitmask |= uint64_t{1} << linfo.litIndex;
+      }
+    }
+
+    inline bool isOccupied(const LitInfo& linfo) const
+    {
+      if (linfo.litIndex < CAPACITY) {
+        return bitmask & (uint64_t{1} << linfo.litIndex);
+      }
+      return false;
+    }
+
+    inline void occupy(LitInfoOccupation other)
+    {
+      bitmask |= other.bitmask;
+    }
+
+    inline bool isExclusive() const
+    {
+      return std::has_single_bit(bitmask);
+    }
+
+  private:
+    uint64_t bitmask = 0;
+  };
+
   // This holds the parts relevant only for Matcher<true,...>
   struct RemovingBase {
     Stack<CodeOp*>* firstsInBlocks;
@@ -395,7 +438,7 @@ public:
     }
 
   protected:
-    void init(const OptCodeTree& tree_, CodeOp* entry_, LitInfo* linfos_ = 0,
+    void init(const OptCodeTree& tree_, CodeOp* entry_, LitInfoOccupation occupied_, LitInfo* linfos_ = 0,
       size_t linfoCnt_ = 0, Stack<CodeOp*>* firstsInBlocks_ = 0);
 
     bool backtrack();
@@ -449,6 +492,10 @@ public:
      * are used (they are not in TermCodeTree::TermMatcher).
      */
     size_t curLInfo;
+    // SUCCESS must be returned once even when occupancy skips position zero.
+    size_t firstLInfo;
+    // Snapshot of positions forced by complete earlier domains at entry.
+    LitInfoOccupation occupied;
   };
 
   //////// auxiliary methods //////////
