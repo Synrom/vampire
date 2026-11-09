@@ -316,7 +316,7 @@ void ClauseCodeTree::rebuildOrdering()
     code.reserve(block->length());
     for (size_t i = 0; i < block->length(); ++i) {
       auto op = &(*block)[i];
-      if (op->isOrderPrune()) { continue; }
+      if (op->isOrderPrune()) { delete op->orderData(); continue; }
       CodeOp copy = *op;
       if (copy.alternative()) { copy.setAlternative(rewrite(copy.alternative(), inherited)); }
       code.push_back(copy);

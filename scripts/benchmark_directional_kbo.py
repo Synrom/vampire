@@ -2,6 +2,7 @@
 """Serial runs of the requested workload; retain logs and focused matcher timings."""
 import argparse
 import json
+import hashlib
 from pathlib import Path
 import re
 import subprocess
@@ -17,6 +18,7 @@ p.add_argument('--output', type=Path, default=Path('Indexing/opt/results/directi
 a = p.parse_args()
 a.output.mkdir(parents=True, exist_ok=True)
 rows = []
+binary_sha256 = hashlib.sha256(Path(a.binary).read_bytes()).hexdigest()
 for repeat in range(1, a.repetitions + 1):
     for strategy in ('discount', 'otter'):
         command = [a.binary, '-sa', strategy, '--time_limit', str(a.time_limit), a.problem]
@@ -27,9 +29,12 @@ for repeat in range(1, a.repetitions + 1):
         (a.output / name).write_text(run.stdout)
         if run.returncode or '% Termination reason: Refutation' not in run.stdout:
             raise RuntimeError(f'{name}: unexpected exit {run.returncode}; see log')
-        row = dict(label=a.label, strategy=strategy, repeat=repeat, wall=wall, log=name)
+        row = dict(label=a.label, strategy=strategy, repeat=repeat, wall=wall, log=name,
+                   command=command, binary_sha256=binary_sha256)
         row['elapsed'] = float(re.search(r'% Time elapsed: ([\d.]+) s', run.stdout)[1])
         profile = re.search(r'codetree-profile next=([\d.]+) setup=([\d.]+) compile=([\d.]+) calls=(\d+)', run.stdout)
+        if not profile:
+            raise RuntimeError("Missing matcher timings: configure with -DCODETREE_ORDER_PROFILE=ON")
         if profile:
             row.update(zip(('next', 'setup', 'compile'), map(float, profile.groups()[:3])))
             row['calls'] = int(profile[4])

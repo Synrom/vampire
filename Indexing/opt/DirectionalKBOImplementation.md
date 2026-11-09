@@ -52,3 +52,13 @@ with the number of next calls. Initialization includes deferred compilation.
 The option is off by default and adds no timer code to normal builds.
 `scripts/benchmark_directional_kbo.py LABEL` runs both requested commands
 serially three times and saves raw logs and JSON measurements.
+
+## Cached eager variant
+
+This branch completes earlier domains and uses an aligned, separately allocated
+`OrderPruneData` for each pruning instruction. The opcode payload holds its
+pointer; `CodeOp` remains 16 bytes. The record holds constraints, a query
+timestamp, and the allowed-query mask. The first visit computes the mask; later
+visits test one bit. A fixed opcode has a fixed indexed prefix, so its cached
+support superset remains safe as domains narrow. Annotation replacement,
+removal, and tree destruction release the records.

@@ -166,6 +166,12 @@ public:
   static const unsigned INSTRUCTION_BITS = 3;
   static_assert(ORDER_PRUNE < 1 << INSTRUCTION_BITS, "Instruction should fit within INSTRUCTION_BITS");
 
+  struct alignas(8) OrderPruneData {
+    uint64_t constraints;
+    uint64_t allowed = 0;
+    unsigned timestamp = 0;
+  };
+
   /** Structure containing a single instruction and its arguments */
   struct CodeOp
   {
@@ -183,11 +189,13 @@ public:
     static CodeOp getOrderPrune(uint64_t constraints)
     {
       CodeOp res;
-      res._content = (constraints << INSTRUCTION_BITS) | ORDER_PRUNE;
+      res._setData(new OrderPruneData{constraints});
+      res._setInstruction(ORDER_PRUNE);
       return res;
     }
     bool isOrderPrune() const { return _instruction() == ORDER_PRUNE; }
-    uint64_t orderConstraints() const { ASS(isOrderPrune()); return _content >> INSTRUCTION_BITS; }
+    OrderPruneData* orderData() const { ASS(isOrderPrune()); return _data<OrderPruneData>(); }
+    uint64_t orderConstraints() const { return orderData()->constraints; }
     static CodeOp getLitEnd(ILStruct* ils);
     static CodeOp getTermOp(Instruction i, unsigned num);
     static CodeOp getGroundTermCheck(const Term* trm);

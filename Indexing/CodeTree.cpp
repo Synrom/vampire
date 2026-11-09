@@ -635,21 +635,26 @@ template<bool removing, bool checkRange>
 bool CodeTree::Matcher<removing, checkRange>::doOrderPrune() const
 {
   if (!orderEnabled) { return true; }
-  uint64_t constraints = op->orderConstraints();
-  uint64_t candidate = uint64_t{1} << linfos[curLInfo].liIndex;
-  unsigned greater = constraints & ((uint64_t{1} << CodeOp::ORDER_DEPTHS) - 1);
-  unsigned smaller = constraints >> CodeOp::ORDER_DEPTHS;
-  while (greater) {
-    unsigned depth = std::countr_zero(greater);
-    if (!(greaterSupport[depth] & candidate)) { return false; }
-    greater &= greater - 1;
+  auto data = op->orderData();
+  if (data->timestamp != tree->_curTimeStamp) {
+    uint64_t constraints = data->constraints;
+    unsigned greater = constraints & ((uint64_t{1} << CodeOp::ORDER_DEPTHS) - 1);
+    unsigned smaller = constraints >> CodeOp::ORDER_DEPTHS;
+    uint64_t allowed = ~uint64_t{0};
+    while (greater && allowed) {
+      allowed &= greaterSupport[std::countr_zero(greater)];
+      greater &= greater - 1;
+    }
+    while (smaller && allowed) {
+      allowed &= smallerSupport[std::countr_zero(smaller)];
+      smaller &= smaller - 1;
+    }
+    // This op has one fixed indexed prefix. Domains at that prefix can only
+    // shrink during a query, so reusing this superset remains conservative.
+    data->allowed = allowed;
+    data->timestamp = tree->_curTimeStamp;
   }
-  while (smaller) {
-    unsigned depth = std::countr_zero(smaller);
-    if (!(smallerSupport[depth] & candidate)) { return false; }
-    smaller &= smaller - 1;
-  }
-  return true;
+  return data->allowed & (uint64_t{1} << linfos[curLInfo].liIndex);
 }
 
 template<bool removing, bool checkRange>
@@ -885,6 +890,7 @@ CodeTree::~CodeTree()
       CodeOp* op=&(*cb)[0];
       ASS_EQ(top_op,op);
       for(size_t rem=cb->length(); rem; rem--,op++) {
+        if (op->isOrderPrune()) { delete op->orderData(); }
         onCodeOpDestroying(op);
         if(op->alternative()) {
           top_ops.push(op->alternative());
@@ -1388,6 +1394,7 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
       //delete ILStruct objects
       size_t cbLen=cb->length();
       for(size_t i=0;i<cbLen;i++) {
+        if ((*cb)[i].isOrderPrune()) { delete (*cb)[i].orderData(); }
         if((*cb)[i].isLitEnd()) {
           delete (*cb)[i].getILS();
         }
