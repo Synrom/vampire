@@ -318,3 +318,9 @@ add_executable(subsat
     SATSubsumption/subsat/subsat_main.cpp
     $<TARGET_OBJECTS:common>
 )
+
+# Focused, opt-in measurements for code-tree ordering experiments.
+option(CODETREE_ORDER_PROFILE "Measure clause matcher next/setup/compilation" OFF)
+if(CODETREE_ORDER_PROFILE)
+  set_source_files_properties(Indexing/ClauseCodeTree.cpp Shell/Statistics.cpp PROPERTIES COMPILE_DEFINITIONS CODETREE_ORDER_PROFILE=1)
+endif()

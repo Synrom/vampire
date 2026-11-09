@@ -325,3 +325,92 @@ TEST_SIMPLIFICATION(neg_sub_res_test12,
 )
 
 }
+
+// Exercise the same mutated instruction graph with and without its ordering
+// interpreter, including lazy domains, equality orientations and resolution.
+#include "Indexing/ClauseCodeTree.hpp"
+#include "Kernel/KBO.hpp"
+#include <set>
+#include <sstream>
+
+TEST_FUN(directional_ordering_mutations)
+{
+  MY_SYNTAX_SUGAR
+  auto ord = KBO::testKBO();
+  Ordering::unsetGlobalOrdering();
+  ALWAYS(Ordering::trySetGlobalOrdering(SmartPtr<Ordering>(&ord, true)));
+  Indexing::ClauseCodeTree tree;
+  std::vector<Clause*> indexed = {
+    clause({p(f(x)), p(x)}),
+    clause({p(f(x)), p(g(x))}),
+    clause({p(f(x)), p(f(f(x)))}),
+    clause({p(f(x)), p(y), q(x)}),
+    clause({~p(f(x)), p(x)}),
+    clause({f(x) == x, p(x)}),
+    clause({p(f(x)), p(x), p(g(x))}),
+    clause({p(x), p(x)}),
+    clause({p(f(x)), p(h(x))}),
+    clause({p(f(x)), p(i(x))}),
+    clause({p(f(x)), p(f2(x,x))}),
+    clause({p(f(x)), p(g2(x,x))}),
+    clause({p(f(x)), p(h2(x,x))}),
+    clause({p(f(x)), p(i2(x,x))})
+  };
+  std::vector<Clause*> queries = {
+    clause({p(f(c)), p(c)}),
+    clause({p(f(c)), p(g(c)), p(c)}),
+    clause({p(f(c)), p(d), p(c), q(c)}),
+    clause({p(f(c)), p(f(f(c)))}),
+    clause({~p(f(c)), p(c)}),
+    clause({p(f(c)), ~p(c)}),
+    clause({c == f(c), p(c)}),
+    clause({~(c == f(c)), p(c)}),
+    clause({p(f(x)), p(x), p(g(y))}),
+    clause({p(c), p(c)})
+  };
+  std::vector<Literal*> universe = {p(c), p(d), p(f(c)), p(g(c)), p(h(c)),
+    p(i(c)), p(f2(c,c)), p(g2(c,c)), p(h2(c,c)), p(i2(c,c)), ~p(c), p(f(f(c)))};
+  for (unsigned a = 0; a < universe.size(); ++a) {
+    for (unsigned b = a + 1; b < universe.size(); ++b) {
+      queries.push_back(clause({universe[a], universe[b]}));
+    }
+  }
+  // Beyond both the 64-LitInfo and 30-index-depth capacities: fallback must
+  // remain complete, and shifts must not exceed their machine-word width.
+  Stack<Lit> longIndexed, longQuery;
+  TermSugar indexedTerm = x, queryTerm = c;
+  for (unsigned n = 0; n < 65; ++n) {
+    longQuery.push(p(queryTerm));
+    if (n < 32) { longIndexed.push(p(indexedTerm)); }
+    indexedTerm = f(indexedTerm);
+    queryTerm = f(queryTerm);
+  }
+  indexed.push_back(clause(longIndexed));
+  queries.push_back(clause(longQuery));
+  auto results = [&](Clause* query, bool resolution, bool pruning) {
+    std::set<std::pair<Clause*, int>> found;
+    Indexing::ClauseCodeTree::ClauseMatcher matcher;
+    matcher.init(&tree, query, resolution, pruning);
+    int resolved;
+    while (auto match = matcher.next(resolved)) { found.emplace(match, resolved); }
+    matcher.reset();
+    return found;
+  };
+  auto check = [&]() {
+    for (auto query : queries) {
+      for (bool resolution : {false, true}) {
+        auto expected = results(query, resolution, false);
+        auto actual = results(query, resolution, true);
+        ALWAYS(actual == expected);
+      }
+    }
+  };
+  for (auto cl : indexed) { tree.insert(cl); check(); }
+  std::ostringstream printed;
+  printed << tree;
+  ALWAYS(printed.str().find("ORDER_PRUNE") != std::string::npos);
+  for (auto cl : indexed) { tree.remove(cl); if (!tree.isEmpty()) { check(); } }
+  for (auto cl : indexed) { tree.insert(cl); }
+  check();
+  Ordering::unsetGlobalOrdering();
+}

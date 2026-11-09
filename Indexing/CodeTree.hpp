@@ -16,6 +16,8 @@
 #define __CodeTree__
 
 #include <bit>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "Forwards.hpp"
 
@@ -73,6 +75,7 @@ public:
     unsigned litIndex;
     FlatTerm* ft;
     bool opposite;
+    uint64_t greater = 0, smaller = 0;
   };
 
   struct MatchInfo : public FlexibleTail<MatchInfo, TermList>
@@ -116,6 +119,8 @@ public:
 
     struct GVArrComparator;
 
+    // Compilation metadata: current literal compared with earlier depths.
+    uint64_t orderConstraints = 0;
     unsigned depth;
     ILStruct* previous;
 
@@ -156,9 +161,10 @@ public:
     ASSIGN_VAR = 4,
     CHECK_VAR = 5,
     SEARCH_STRUCT = 6,
+    ORDER_PRUNE = 7,
   };
   static const unsigned INSTRUCTION_BITS = 3;
-  static_assert(SEARCH_STRUCT < 1 << INSTRUCTION_BITS, "Instruction should fit within INSTRUCTION_BITS");
+  static_assert(ORDER_PRUNE < 1 << INSTRUCTION_BITS, "Instruction should fit within INSTRUCTION_BITS");
 
   /** Structure containing a single instruction and its arguments */
   struct CodeOp
@@ -172,6 +178,16 @@ public:
       ASS(res.isSuccess());
       return res;
     }
+    // Thirty prior depths in each direction, leaving the instruction tag intact.
+    static constexpr unsigned ORDER_DEPTHS = 30;
+    static CodeOp getOrderPrune(uint64_t constraints)
+    {
+      CodeOp res;
+      res._content = (constraints << INSTRUCTION_BITS) | ORDER_PRUNE;
+      return res;
+    }
+    bool isOrderPrune() const { return _instruction() == ORDER_PRUNE; }
+    uint64_t orderConstraints() const { ASS(isOrderPrune()); return _content >> INSTRUCTION_BITS; }
     static CodeOp getLitEnd(ILStruct* ils);
     static CodeOp getTermOp(Instruction i, unsigned num);
     static CodeOp getGroundTermCheck(const Term* trm);
@@ -236,6 +252,8 @@ public:
      */
     CodeOp* _alternative = 0;
   };
+
+  static_assert(sizeof(CodeOp) == 16, "Ordering pruning must not enlarge CodeOp");
 
   /**
    * A search structure that collects alternatives of the same
@@ -413,6 +431,11 @@ public:
     CodeOp* op;
 
     BindingArray bindings;
+    // Unions of supported query LitInfos, indexed by prior literal depth.
+    uint64_t greaterSupport[CodeOp::ORDER_DEPTHS];
+    uint64_t smallerSupport[CodeOp::ORDER_DEPTHS];
+    bool orderEnabled = false;
+    bool doOrderPrune() const;
 
     bool keepRecycled() const
     {
@@ -546,6 +569,9 @@ public:
 
   //////// member variables //////////
 
+  // Compilation-only caches, one entry per block/search structure, never per op.
+  std::unordered_set<CodeOp*> _orderingDirtyRoots;
+  std::unordered_map<CodeOp*, uint64_t> _orderingSummaries, _orderingInherited;
   bool _clauseCodeTree = false;
   unsigned _curTimeStamp = 0;
 

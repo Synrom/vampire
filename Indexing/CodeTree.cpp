@@ -381,6 +381,9 @@ std::string functorStr(unsigned functor, bool litStart)
 void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litStart) const
 {
   switch (op._instruction()) {
+  case ORDER_PRUNE:
+    out << "ORDER_PRUNE " << op.orderConstraints();
+    break;
     case CodeTree::SUCCESS_OR_FAIL:
       if (op.isSuccess()) {
         out << GREEN << "success " << CRESET;
@@ -578,6 +581,9 @@ bool CodeTree::Matcher<removing, checkRange>::execute()
           }
         }
         break;
+      case ORDER_PRUNE:
+        if constexpr (!removing) { shouldBacktrack = !doOrderPrune(); }
+        break;
       case LIT_END:
         if constexpr (removing) {
           ASS(RemovingBase::matchingClauses);
@@ -626,8 +632,30 @@ bool CodeTree::Matcher<removing, checkRange>::execute()
 }
 
 template<bool removing, bool checkRange>
+bool CodeTree::Matcher<removing, checkRange>::doOrderPrune() const
+{
+  if (!orderEnabled) { return true; }
+  uint64_t constraints = op->orderConstraints();
+  uint64_t candidate = uint64_t{1} << linfos[curLInfo].liIndex;
+  unsigned greater = constraints & ((uint64_t{1} << CodeOp::ORDER_DEPTHS) - 1);
+  unsigned smaller = constraints >> CodeOp::ORDER_DEPTHS;
+  while (greater) {
+    unsigned depth = std::countr_zero(greater);
+    if (!(greaterSupport[depth] & candidate)) { return false; }
+    greater &= greater - 1;
+  }
+  while (smaller) {
+    unsigned depth = std::countr_zero(smaller);
+    if (!(smallerSupport[depth] & candidate)) { return false; }
+    smaller &= smaller - 1;
+  }
+  return true;
+}
+
+template<bool removing, bool checkRange>
 void CodeTree::Matcher<removing, checkRange>::init(const CodeTree& tree_, CodeOp* entry_, LitInfoOccupation occupied_, LitInfo* linfos_, size_t linfoCnt_, Stack<CodeOp*>* firstsInBlocks_)
 {
+  orderEnabled=false;
   tree=&tree_;
   entry=entry_;
   occupied = occupied_;
@@ -1099,6 +1127,7 @@ void CodeTree::incorporate(CodeStack& code)
 
   if(isEmpty()) {
     _entryPoint=buildBlock(code, code.length(), 0);
+    if (_clauseCodeTree) { _orderingDirtyRoots.insert(getEntryPoint()); }
     code.reset();
     return;
   }
@@ -1113,12 +1142,15 @@ void CodeTree::incorporate(CodeStack& code)
 
   {
     CodeOp* treeOp = getEntryPoint();
+    if (_clauseCodeTree) { _orderingDirtyRoots.insert(treeOp); }
 
     for (size_t i = 0; i < clen; i++) {
+      while (treeOp->isOrderPrune()) { ++treeOp; }
       CodeOp* chainStart = treeOp;
       size_t checkFunOps = 0;
       size_t checkGroundTermOps = 0;
       for (;;) {
+        if (treeOp->isOrderPrune()) { ++treeOp; continue; }
         if (treeOp->isSearchStruct()) {
           //handle the SEARCH_STRUCT
           SearchStruct* ss = treeOp->getSearchStruct();
@@ -1130,6 +1162,7 @@ void CodeTree::incorporate(CodeStack& code)
               goto matching_done;
             }
             treeOp = *toPtr;
+            if (_clauseCodeTree) { _orderingDirtyRoots.insert(treeOp); }
             continue;
           }
         } else if (code[i].equalsForOpMatching(*treeOp)) {
@@ -1140,6 +1173,7 @@ void CodeTree::incorporate(CodeStack& code)
         if (treeOp->alternative()) {
           //try alternative if there is some
           treeOp = treeOp->alternative();
+          if (_clauseCodeTree) { _orderingDirtyRoots.insert(treeOp); }
         } else {
           //matching failed, we'll add the new branch here
           tailTarget = &treeOp->alternative();
@@ -1180,6 +1214,7 @@ void CodeTree::incorporate(CodeStack& code)
 
       if (treeOp->isLitEnd()) {
         lastMatchedILS = treeOp->getILS();
+        lastMatchedILS->orderConstraints &= code[i].getILS()->orderConstraints;
       }
 
       //the SEARCH_STRUCT operation does not occur in a CodeBlock
@@ -1209,6 +1244,7 @@ matching_done:
 
   CodeBlock* rem=buildBlock(code, clen-matchedCnt, lastMatchedILS);
   *tailTarget=&(*rem)[0];
+  if (_clauseCodeTree) { _orderingDirtyRoots.insert(*tailTarget); }
   LOG_OP(rem->toString()<<" incorporated, mismatch caused by "<<code[matchedCnt].toString());
 
   //truncate the part that was used and thus does not need disposing
@@ -1226,6 +1262,8 @@ template<CodeTree::SearchStruct::Kind k>
 void CodeTree::compressCheckOps(CodeOp* chainStart)
 {
   ASS(chainStart->alternative());
+  _orderingSummaries.clear();
+  _orderingInherited.clear();
 
   static Stack<CodeOp*> toDo;
   static Stack<CodeOp*> chfOps;

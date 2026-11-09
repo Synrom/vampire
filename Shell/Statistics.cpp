@@ -15,6 +15,7 @@
  */
 
 #include <iostream>
+#include "Indexing/CodeTreeProfile.hpp"
 
 #include "Debug/RuntimeStatistics.hpp"
 
@@ -65,6 +66,9 @@ void Statistics::explainRefutationNotFound(std::ostream& out)
 
 void Statistics::print(std::ostream& out)
 {
+#ifdef CODETREE_ORDER_PROFILE
+  Indexing::CodeTreeProfile::report();
+#endif
   if (env.options->statistics() != Options::Statistics::NONE) {
 
   SaturationAlgorithm::tryUpdateFinalClauseCount();

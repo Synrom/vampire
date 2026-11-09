@@ -43,6 +43,9 @@ public:
 
 private:
 
+  bool _orderingDirty = false;
+  void rebuildOrdering();
+
   //////// insertion //////////
 
   struct InitialLiteralOrderingComparator;
@@ -93,7 +96,7 @@ private:
 public:
   struct ClauseMatcher
   {
-    void init(ClauseCodeTree* tree_, Clause* query_, bool sres_);
+    void init(ClauseCodeTree* tree_, Clause* query_, bool sres_, bool useOrdering = true);
     void reset();
     bool keepRecycled() const { return lInfos.keepRecycled(); }
 
@@ -119,6 +122,7 @@ public:
     Clause* query;
     ClauseCodeTree* tree;
     bool sres;
+    bool orderingEnabled;
 
     static const unsigned sresNoLiteral=static_cast<unsigned>(-1);
     unsigned sresLiteral;

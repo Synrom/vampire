@@ -13,6 +13,9 @@
  */
 
 #include <utility>
+#include <functional>
+#include <unordered_map>
+#include "Kernel/Ordering.hpp"
 
 #include "Debug/RuntimeStatistics.hpp"
 #include "Debug/TimeProfiling.hpp"
@@ -26,6 +29,7 @@
 #include "Kernel/Term.hpp"
 
 #include "ClauseCodeTree.hpp"
+#include "CodeTreeProfile.hpp"
 
 #undef RSTAT_COLLECTION
 #define RSTAT_COLLECTION 0
@@ -61,10 +65,12 @@ ClauseCodeTree::ClauseCodeTree()
 
 void ClauseCodeTree::insert(Clause* cl)
 {
+  CT_PROFILE(compile);
   // Insertion is three phases that do quite different things, and only their sum was
   // visible before. Each scope is entered once per inserted clause, so the three
   // together cost ~0.02% of a sweep -- see the comment in ClauseMatcher::init for the
   // arithmetic and for what is deliberately left unmeasured.
+  _orderingDirty = true;
   unsigned clen=cl->length();
   static DArray<Literal*> lits;
   lits.initFromArray(clen, *cl);
@@ -87,6 +93,15 @@ void ClauseCodeTree::insert(Clause* cl)
     for(unsigned i=0;i<clen;i++) {
       compiler.nextLit();
       compiler.handleTerm(lits[i]);
+      if (auto ordering = Ordering::tryGetGlobalOrdering()) {
+        uint64_t constraints = 0;
+        for (unsigned j = 0; j < i && j < CodeOp::ORDER_DEPTHS; ++j) {
+          auto relation = ordering->compare(lits[i], lits[j]);
+          if (relation == Ordering::GREATER) { constraints |= uint64_t{1} << j; }
+          if (relation == Ordering::LESS) { constraints |= uint64_t{1} << (j + CodeOp::ORDER_DEPTHS); }
+        }
+        code.top().getILS()->orderConstraints = constraints;
+      }
     }
     code.push(CodeOp::getSuccess(cl));
 
@@ -202,6 +217,7 @@ void ClauseCodeTree::matchCode(CodeStack& code, CodeOp* startOp, size_t& matched
 
   for(size_t i=0;i<clen;i++) {
     for(;;) {
+      if(treeOp->isOrderPrune()) { ++treeOp; continue; }
       if(treeOp->isSearchStruct()) {
 	SearchStruct* ss=treeOp->getSearchStruct();
 	CodeOp** toPtr;
@@ -237,10 +253,107 @@ void ClauseCodeTree::matchCode(CodeStack& code, CodeOp* startOp, size_t& matched
 }
 
 
+// Recompute the common constraints of each continuation, then emit only the
+// difference from constraints already tested on that path. Compilation scratch
+// maps disappear before retrieval: ordinary CodeOps carry no ordering metadata.
+// Rebuilding is deferred until retrieval, so consecutive mutations are batched.
+void ClauseCodeTree::rebuildOrdering()
+{
+  if (!_orderingDirty || isEmpty()) { return; }
+  _orderingDirty = false;
+  std::unordered_map<CodeOp*, uint64_t> selected;
+  std::function<uint64_t(CodeOp*)> summarize = [&](CodeOp* first) -> uint64_t {
+    if (!_orderingDirtyRoots.count(first)) {
+      auto cached = _orderingSummaries.find(first);
+      if (cached != _orderingSummaries.end()) { return cached->second; }
+    }
+    if (first->isSearchStruct()) {
+      auto ss = first->getSearchStruct();
+      uint64_t common = ~uint64_t{0};
+      bool any = false;
+      for (auto target : ss->targets) {
+        if (target) { common &= summarize(target); any = true; }
+      }
+      if (first->alternative()) { common &= summarize(first->alternative()); any = true; }
+      return _orderingSummaries[first] = any ? common : 0;
+    }
+    auto block = firstOpToCodeBlock(first);
+    uint64_t common = 0;
+    for (size_t i = block->length(); i-- > 0;) {
+      auto op = &(*block)[i];
+      if (op->isOrderPrune()) { ASS(!op->alternative()); continue; }
+      if (op->isLitEnd()) { common = op->getILS()->orderConstraints; }
+      else if (op->isSuccess() || op->isFail()) { common = 0; }
+      selected[op] = common;
+      if (op->alternative()) { common &= summarize(op->alternative()); }
+    }
+    return _orderingSummaries[first] = common;
+  };
+  summarize(getEntryPoint());
+
+  std::function<CodeOp*(CodeOp*, uint64_t)> rewrite = [&](CodeOp* first, uint64_t inherited) -> CodeOp* {
+    auto cached = _orderingInherited.find(first);
+    if (!_orderingDirtyRoots.count(first) && cached != _orderingInherited.end() && cached->second == inherited) {
+      return first;
+    }
+    uint64_t incoming = inherited;
+    if (first->isSearchStruct()) {
+      auto ss = first->getSearchStruct();
+      for (auto& target : ss->targets) {
+        if (target) { target = rewrite(target, inherited); }
+      }
+      if (first->alternative()) { first->setAlternative(rewrite(first->alternative(), inherited)); }
+      _orderingInherited[first] = incoming;
+      return first;
+    }
+    if (!selected.count(first)) {
+      _orderingDirtyRoots.insert(first);
+      summarize(first);
+    }
+    uint64_t common = _orderingSummaries.at(first);
+    auto block = firstOpToCodeBlock(first);
+    std::vector<CodeOp> code;
+    code.reserve(block->length());
+    for (size_t i = 0; i < block->length(); ++i) {
+      auto op = &(*block)[i];
+      if (op->isOrderPrune()) { continue; }
+      CodeOp copy = *op;
+      if (copy.alternative()) { copy.setAlternative(rewrite(copy.alternative(), inherited)); }
+      code.push_back(copy);
+      if (op->isLitEnd()) { inherited = 0; }
+      else if (!op->isSuccess() && !op->isFail()) {
+        uint64_t extra = selected.at(op) & ~inherited;
+        if (extra) {
+          code.push_back(CodeOp::getOrderPrune(extra));
+          inherited |= extra;
+        }
+      }
+    }
+    auto result = block->length() == code.size() ? block : CodeBlock::allocate(code.size());
+    for (size_t i = 0; i < code.size(); ++i) { (*result)[i] = code[i]; }
+    if (result != block) {
+      _orderingSummaries.erase(first);
+      _orderingInherited.erase(first);
+      block->deallocate();
+    }
+    auto newFirst = &(*result)[0];
+    _orderingSummaries[newFirst] = common;
+    _orderingInherited[newFirst] = incoming;
+    return newFirst;
+  };
+  _entryPoint = firstOpToCodeBlock(rewrite(getEntryPoint(), 0));
+  _orderingDirtyRoots.clear();
+}
+
 //////////////// removal ////////////////////
 
 void ClauseCodeTree::remove(Clause* cl)
 {
+  CT_PROFILE(compile);
+  _orderingSummaries.clear();
+  _orderingInherited.clear();
+  _orderingDirtyRoots.clear();
+  _orderingDirty = true;
   static DArray<LitInfo> lInfos;
   Recycled<Stack<CodeOp*>> firstsInBlocks;
   Recycled<Stack<Recycled<RemovingLiteralMatcher, NoReset>>> rlms;
@@ -489,8 +602,9 @@ void ClauseCodeTree::LiteralMatcher::recordMatch()
  * of the @b query_ clause.
  * If @b sres_ if true, we perform subsumption resolution
  */
-void ClauseCodeTree::ClauseMatcher::init(ClauseCodeTree* tree_, Clause* query_, bool sres_)
+void ClauseCodeTree::ClauseMatcher::init(ClauseCodeTree* tree_, Clause* query_, bool sres_, bool useOrdering)
 {
+  CT_PROFILE(setup);
   // "codetree forward subsumption" is 18% of a sweep's instructions and was one opaque
   // number. These three scopes -- setup here, teardown in reset(), and the multi-literal
   // matching in checkCandidate() -- cut it into the parts that are not the code-tree
@@ -509,9 +623,11 @@ void ClauseCodeTree::ClauseMatcher::init(ClauseCodeTree* tree_, Clause* query_, 
 
   ASS(!tree_->isEmpty());
 
+  tree_->rebuildOrdering();
   query=query_;
   tree=tree_;
   sres=sres_;
+  orderingEnabled = useOrdering;
   lms.reset();
 
 #if VDEBUG
@@ -567,6 +683,29 @@ void ClauseCodeTree::ClauseMatcher::init(ClauseCodeTree* tree_, Clause* query_, 
     sresLiteral=sresNoLiteral;
   }
 
+  // Bits name LitInfos (including equality orientations and complemented images).
+  // Larger queries conservatively use the original matcher.
+  if (orderingEnabled && liCnt <= 64) {
+    if (auto ordering = Ordering::tryGetGlobalOrdering()) {
+      for (unsigned i = 0; i < liCnt; ++i) {
+        auto& a = lInfos[i];
+        Literal* al = (*query)[a.litIndex];
+        if (a.opposite) { al = Literal::complementaryLiteral(al); }
+        for (unsigned j = i + 1; j < liCnt; ++j) {
+          auto& b = lInfos[j];
+          if (a.litIndex == b.litIndex || (a.opposite && b.opposite)) { continue; }
+          Literal* bl = (*query)[b.litIndex];
+          if (b.opposite) { bl = Literal::complementaryLiteral(bl); }
+          auto relation = ordering->compare(al, bl);
+          if (relation == Ordering::GREATER) {
+            a.smaller |= uint64_t{1} << j; b.greater |= uint64_t{1} << i;
+          } else if (relation == Ordering::LESS) {
+            a.greater |= uint64_t{1} << j; b.smaller |= uint64_t{1} << i;
+          }
+        }
+      }
+    }
+  }
   tree->incTimeStamp();
   enterLiteral(tree->getEntryPoint(), clen==0);
 }
@@ -594,6 +733,8 @@ void ClauseCodeTree::ClauseMatcher::reset()
  */
 Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
 {
+  CT_PROFILE(next);
+  CT_PROFILE_CALL();
   if(lms.isEmpty()) {
     return 0;
   }
@@ -748,6 +889,25 @@ void ClauseCodeTree::ClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuc
   // Derive occupancy from the active LIT_ENDs
   LitInfoOccupation occupied=seekOnlySuccess ? LitInfoOccupation() : occupiedPositions();
   lm->init(*tree, entry, lInfos.array(), linfoCnt, seekOnlySuccess, occupied);
+  if (orderingEnabled && !seekOnlySuccess && lInfos.size() <= 64 && Ordering::tryGetGlobalOrdering()) {
+    lm->orderEnabled = true;
+    for (unsigned d = 0; d < lms.size() && d < CodeOp::ORDER_DEPTHS; ++d) {
+      auto& prior = lms[d];
+      uint64_t greater = ~uint64_t{0}, smaller = ~uint64_t{0};
+      // Unfinished lazy domains are not safe evidence for rejecting a candidate.
+      if (prior->eagerlyMatched()) {
+        greater = smaller = 0;
+        auto ils = prior->getILS();
+        for (unsigned m = 0; m < ils->matchCnt; ++m) {
+          auto& info = lInfos[ils->getMatch(m)->liIndex];
+          greater |= info.greater;
+          smaller |= info.smaller;
+        }
+      }
+      lm->greaterSupport[d] = greater;
+      lm->smallerSupport[d] = smaller;
+    }
+  }
   lms.push(std::move(lm));
 }
 
