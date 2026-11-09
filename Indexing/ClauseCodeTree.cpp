@@ -885,6 +885,13 @@ void ClauseCodeTree::ClauseMatcher::enterLiteral(CodeOp* entry, bool seekOnlySuc
     linfoCnt/=2;
   }
 
+  // Complete earlier domains before using absence of ordering support. This
+  // also lets the unchanged occupancy filter exploit newly discovered singletons.
+  if (orderingEnabled && !seekOnlySuccess && lInfos.size() <= 64) {
+    for (auto& prior : lms) {
+      if (!prior->eagerlyMatched()) { prior->doEagerMatching(); }
+    }
+  }
   Recycled<LiteralMatcher, NoReset> lm;
   // Derive occupancy from the active LIT_ENDs
   LitInfoOccupation occupied=seekOnlySuccess ? LitInfoOccupation() : occupiedPositions();
