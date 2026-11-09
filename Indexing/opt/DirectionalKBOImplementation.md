@@ -34,8 +34,10 @@ LitInfos and constraints beyond the first 30 indexed depths fall back
 conservatively. The existing occupancy filter remains unchanged.
 
 On entry to a literal, each complete earlier domain supplies the union of its
-members' query masks. An unfinished lazy domain initially supplies all bits,
-so it cannot justify rejection. The instruction intersects the relevant
+members' query masks. The default packed eager variant completes earlier
+domains first, which can also strengthen occupancy. The packed lazy variant
+instead supplies all bits for an unfinished domain, so it cannot justify
+rejection. The instruction intersects the relevant
 support sets (or equivalently tests candidate membership in each). Domains
 may narrow later; cached supersets only weaken pruning. The global ordering
 used for insertion must remain in place throughout the tree's lifetime.
@@ -51,4 +53,9 @@ inside `ClauseMatcher::next`, query initialization, and insert/remove, along
 with the number of next calls. Initialization includes deferred compilation.
 The option is off by default and adds no timer code to normal builds.
 `scripts/benchmark_directional_kbo.py LABEL` runs both requested commands
-serially three times and saves raw logs and JSON measurements.
+serially three times and saves raw logs and JSON measurements. Its default
+limit is 900 seconds; ranking uses only cumulative `ClauseMatcher::next` time.
+The script requires the profiling option and rejects missing measurements.
+
+See [the experiment results](results/directional-kbo/Results.md) for branch
+names, timings, and the baseline instrumentation patch.

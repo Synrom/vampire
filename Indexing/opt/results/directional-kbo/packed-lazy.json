@@ -1,0 +1,50 @@
+[
+  {
+    "label": "packed-lazy",
+    "strategy": "discount",
+    "repeat": 1,
+    "wall": 9.798663875029888,
+    "log": "packed-lazy-discount-1.log",
+    "elapsed": 9.426,
+    "next": 5.172630403,
+    "setup": 2.24021464,
+    "compile": 0.005668423,
+    "calls": 649175
+  },
+  {
+    "label": "packed-lazy",
+    "strategy": "otter",
+    "repeat": 1,
+    "wall": 8.588963582995348,
+    "log": "packed-lazy-otter-1.log",
+    "elapsed": 8.581,
+    "next": 5.17030475,
+    "setup": 2.508955823,
+    "compile": 0.311830706,
+    "calls": 226195
+  },
+  {
+    "label": "packed-lazy",
+    "strategy": "discount",
+    "repeat": 2,
+    "wall": 9.834798417054117,
+    "log": "packed-lazy-discount-2.log",
+    "elapsed": 9.824,
+    "next": 5.347441638,
+    "setup": 2.32458335,
+    "compile": 0.0061487,
+    "calls": 649175
+  },
+  {
+    "label": "packed-lazy",
+    "strategy": "otter",
+    "repeat": 2,
+    "wall": 8.008508959028404,
+    "log": "packed-lazy-otter-2.log",
+    "elapsed": 8.0,
+    "next": 4.771810685,
+    "setup": 2.356208416,
+    "compile": 0.299543532,
+    "calls": 226195
+  }
+]

@@ -1,0 +1,50 @@
+[
+  {
+    "label": "packed-eager",
+    "strategy": "discount",
+    "repeat": 1,
+    "wall": 9.767409374995623,
+    "log": "packed-eager-discount-1.log",
+    "elapsed": 9.392,
+    "next": 5.164470165,
+    "setup": 2.227979315,
+    "compile": 0.005623562,
+    "calls": 649163
+  },
+  {
+    "label": "packed-eager",
+    "strategy": "otter",
+    "repeat": 1,
+    "wall": 7.811846667027567,
+    "log": "packed-eager-otter-1.log",
+    "elapsed": 7.804,
+    "next": 4.654591133,
+    "setup": 2.318786894,
+    "compile": 0.295903773,
+    "calls": 226192
+  },
+  {
+    "label": "packed-eager",
+    "strategy": "discount",
+    "repeat": 2,
+    "wall": 9.523587834031787,
+    "log": "packed-eager-discount-2.log",
+    "elapsed": 9.513,
+    "next": 5.229036819,
+    "setup": 2.253718306,
+    "compile": 0.005556913,
+    "calls": 649163
+  },
+  {
+    "label": "packed-eager",
+    "strategy": "otter",
+    "repeat": 2,
+    "wall": 8.053471791034099,
+    "log": "packed-eager-otter-2.log",
+    "elapsed": 8.046,
+    "next": 4.776673668,
+    "setup": 2.418774141,
+    "compile": 0.307682511,
+    "calls": 226192
+  }
+]

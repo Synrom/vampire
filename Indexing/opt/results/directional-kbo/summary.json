@@ -1,0 +1,26 @@
+{
+  "metric": "cumulative ClauseMatcher::next seconds",
+  "repetitions": 3,
+  "medians": {
+    "baseline-profile": {
+      "discount": 5.58511306,
+      "otter": 4.755385095
+    },
+    "packed-lazy": {
+      "discount": 5.25558216,
+      "otter": 4.771810685
+    },
+    "packed-eager": {
+      "discount": 5.229036819,
+      "otter": 4.776673668
+    },
+    "split-eager": {
+      "discount": 5.245540048,
+      "otter": 4.647534153
+    },
+    "cached-eager": {
+      "discount": 5.242996422,
+      "otter": 4.758126487
+    }
+  }
+}

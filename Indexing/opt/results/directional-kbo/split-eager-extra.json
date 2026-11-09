@@ -1,0 +1,44 @@
+[
+  {
+    "label": "split-eager-extra",
+    "strategy": "discount",
+    "repeat": 1,
+    "wall": 10.16553879197454,
+    "log": "split-eager-extra-discount-1.log",
+    "command": [
+      "/tmp/vampire-kbo-split-eager",
+      "-sa",
+      "discount",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "2ff06caae5e34979152a9aeb6988696e2b19e761bc026894e01d515384cae211",
+    "elapsed": 9.789,
+    "next": 5.369842832,
+    "setup": 2.306496897,
+    "compile": 0.006018765,
+    "calls": 649163
+  },
+  {
+    "label": "split-eager-extra",
+    "strategy": "otter",
+    "repeat": 1,
+    "wall": 7.7304692909820005,
+    "log": "split-eager-extra-otter-1.log",
+    "command": [
+      "/tmp/vampire-kbo-split-eager",
+      "-sa",
+      "otter",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "2ff06caae5e34979152a9aeb6988696e2b19e761bc026894e01d515384cae211",
+    "elapsed": 7.723,
+    "next": 4.633366515,
+    "setup": 2.269243475,
+    "compile": 0.299200304,
+    "calls": 226192
+  }
+]

@@ -1,0 +1,86 @@
+[
+  {
+    "label": "cached-eager",
+    "strategy": "discount",
+    "repeat": 1,
+    "wall": 9.710556707985234,
+    "log": "cached-eager-discount-1.log",
+    "command": [
+      "./vampire",
+      "-sa",
+      "discount",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "cfa5f5a9ec626aabb5cf0e38693e55d1481bfa53f33e0d4fb23b076f8cb934d4",
+    "elapsed": 9.337,
+    "next": 5.147694424,
+    "setup": 2.217638517,
+    "compile": 0.005586634,
+    "calls": 649163
+  },
+  {
+    "label": "cached-eager",
+    "strategy": "otter",
+    "repeat": 1,
+    "wall": 8.13502641703235,
+    "log": "cached-eager-otter-1.log",
+    "command": [
+      "./vampire",
+      "-sa",
+      "otter",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "cfa5f5a9ec626aabb5cf0e38693e55d1481bfa53f33e0d4fb23b076f8cb934d4",
+    "elapsed": 8.128,
+    "next": 4.808882272,
+    "setup": 2.470685134,
+    "compile": 0.304359133,
+    "calls": 226192
+  },
+  {
+    "label": "cached-eager",
+    "strategy": "discount",
+    "repeat": 2,
+    "wall": 9.546113541990053,
+    "log": "cached-eager-discount-2.log",
+    "command": [
+      "./vampire",
+      "-sa",
+      "discount",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "cfa5f5a9ec626aabb5cf0e38693e55d1481bfa53f33e0d4fb23b076f8cb934d4",
+    "elapsed": 9.536,
+    "next": 5.242996422,
+    "setup": 2.260807485,
+    "compile": 0.005446012,
+    "calls": 649163
+  },
+  {
+    "label": "cached-eager",
+    "strategy": "otter",
+    "repeat": 2,
+    "wall": 8.035119875043165,
+    "log": "cached-eager-otter-2.log",
+    "command": [
+      "./vampire",
+      "-sa",
+      "otter",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "cfa5f5a9ec626aabb5cf0e38693e55d1481bfa53f33e0d4fb23b076f8cb934d4",
+    "elapsed": 8.028,
+    "next": 4.758126487,
+    "setup": 2.43011026,
+    "compile": 0.300685297,
+    "calls": 226192
+  }
+]

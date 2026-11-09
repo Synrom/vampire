@@ -1,0 +1,44 @@
+[
+  {
+    "label": "packed-lazy-extra",
+    "strategy": "discount",
+    "repeat": 1,
+    "wall": 9.932221166032832,
+    "log": "packed-lazy-extra-discount-1.log",
+    "command": [
+      "/tmp/vampire-kbo-packed-lazy",
+      "-sa",
+      "discount",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "400507cb3af552238fbf94c603a41840bf9f376023e915e793bf821e84387bae",
+    "elapsed": 9.577,
+    "next": 5.25558216,
+    "setup": 2.275074316,
+    "compile": 0.0059153,
+    "calls": 649175
+  },
+  {
+    "label": "packed-lazy-extra",
+    "strategy": "otter",
+    "repeat": 1,
+    "wall": 7.75881854101317,
+    "log": "packed-lazy-extra-otter-1.log",
+    "command": [
+      "/tmp/vampire-kbo-packed-lazy",
+      "-sa",
+      "otter",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "400507cb3af552238fbf94c603a41840bf9f376023e915e793bf821e84387bae",
+    "elapsed": 7.751,
+    "next": 4.658032326,
+    "setup": 2.274518635,
+    "compile": 0.296148158,
+    "calls": 226195
+  }
+]

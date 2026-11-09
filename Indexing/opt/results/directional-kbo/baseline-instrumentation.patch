@@ -1,0 +1,115 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d53462505..f38916347 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -318,3 +318,9 @@ add_executable(subsat
+     SATSubsumption/subsat/subsat_main.cpp
+     $<TARGET_OBJECTS:common>
+ )
++
++# Focused, opt-in measurements for code-tree ordering experiments.
++option(CODETREE_ORDER_PROFILE "Measure clause matcher next/setup/compilation" OFF)
++if(CODETREE_ORDER_PROFILE)
++  set_source_files_properties(Indexing/ClauseCodeTree.cpp Shell/Statistics.cpp PROPERTIES COMPILE_DEFINITIONS CODETREE_ORDER_PROFILE=1)
++endif()
+diff --git a/Indexing/ClauseCodeTree.cpp b/Indexing/ClauseCodeTree.cpp
+index f28e7b3e2..3418416e2 100644
+--- a/Indexing/ClauseCodeTree.cpp
++++ b/Indexing/ClauseCodeTree.cpp
+@@ -26,6 +26,7 @@
+ #include "Kernel/Term.hpp"
+ 
+ #include "ClauseCodeTree.hpp"
++#include "CodeTreeProfile.hpp"
+ 
+ #undef RSTAT_COLLECTION
+ #define RSTAT_COLLECTION 0
+@@ -61,6 +62,7 @@ ClauseCodeTree::ClauseCodeTree()
+ 
+ void ClauseCodeTree::insert(Clause* cl)
+ {
++  CT_PROFILE(compile);
+   // Insertion is three phases that do quite different things, and only their sum was
+   // visible before. Each scope is entered once per inserted clause, so the three
+   // together cost ~0.02% of a sweep -- see the comment in ClauseMatcher::init for the
+@@ -241,6 +243,7 @@ void ClauseCodeTree::matchCode(CodeStack& code, CodeOp* startOp, size_t& matched
+ 
+ void ClauseCodeTree::remove(Clause* cl)
+ {
++  CT_PROFILE(compile);
+   static DArray<LitInfo> lInfos;
+   Recycled<Stack<CodeOp*>> firstsInBlocks;
+   Recycled<Stack<Recycled<RemovingLiteralMatcher, NoReset>>> rlms;
+@@ -491,6 +494,7 @@ void ClauseCodeTree::LiteralMatcher::recordMatch()
+  */
+ void ClauseCodeTree::ClauseMatcher::init(ClauseCodeTree* tree_, Clause* query_, bool sres_)
+ {
++  CT_PROFILE(setup);
+   // "codetree forward subsumption" is 18% of a sweep's instructions and was one opaque
+   // number. These three scopes -- setup here, teardown in reset(), and the multi-literal
+   // matching in checkCandidate() -- cut it into the parts that are not the code-tree
+@@ -594,6 +598,8 @@ void ClauseCodeTree::ClauseMatcher::reset()
+  */
+ Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
+ {
++  CT_PROFILE(next);
++  CT_PROFILE_CALL();
+   if(lms.isEmpty()) {
+     return 0;
+   }
+diff --git a/Shell/Statistics.cpp b/Shell/Statistics.cpp
+index f559d0278..6a2830dc6 100644
+--- a/Shell/Statistics.cpp
++++ b/Shell/Statistics.cpp
+@@ -15,6 +15,7 @@
+  */
+ 
+ #include <iostream>
++#include "Indexing/CodeTreeProfile.hpp"
+ 
+ #include "Debug/RuntimeStatistics.hpp"
+ 
+@@ -65,6 +66,9 @@ void Statistics::explainRefutationNotFound(std::ostream& out)
+ 
+ void Statistics::print(std::ostream& out)
+ {
++#ifdef CODETREE_ORDER_PROFILE
++  Indexing::CodeTreeProfile::report();
++#endif
+   if (env.options->statistics() != Options::Statistics::NONE) {
+ 
+   SaturationAlgorithm::tryUpdateFinalClauseCount();
+diff --git a/Indexing/CodeTreeProfile.hpp b/Indexing/CodeTreeProfile.hpp
+new file mode 100644
+--- /dev/null
++++ b/Indexing/CodeTreeProfile.hpp
+@@ -0,0 +1,29 @@
++/* Optional experiment instrumentation; no overhead in normal builds. */
++#ifndef CODE_TREE_PROFILE_HPP
++#define CODE_TREE_PROFILE_HPP
++#ifdef CODETREE_ORDER_PROFILE
++#include <chrono>
++#include <cstdio>
++namespace Indexing {
++struct CodeTreeProfile {
++  inline static double next = 0, setup = 0, compile = 0;
++  inline static unsigned long calls = 0;
++  static void report() {
++    std::fprintf(stderr, "codetree-profile next=%.9f setup=%.9f compile=%.9f calls=%lu\n", next, setup, compile, calls);
++  }
++};
++
++struct CodeTreeTimer {
++  double& target;
++  std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
++  explicit CodeTreeTimer(double& target) : target(target) {}
++  ~CodeTreeTimer() { target += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); }
++};
++}
++#define CT_PROFILE(section) CodeTreeTimer ctTimer(CodeTreeProfile::section)
++#define CT_PROFILE_CALL() ++CodeTreeProfile::calls
++#else
++#define CT_PROFILE(section)
++#define CT_PROFILE_CALL()
++#endif
++#endif

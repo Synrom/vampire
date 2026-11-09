@@ -1,0 +1,128 @@
+[
+  {
+    "label": "baseline-profile",
+    "strategy": "discount",
+    "repeat": 1,
+    "wall": 8.324039999977686,
+    "log": "baseline-profile-discount-1.log",
+    "command": [
+      "./vampire",
+      "-sa",
+      "discount",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "6827d5a40122683ccec8bf472781faaf49061ff1353efce68b8cdd837346166f",
+    "elapsed": 7.783,
+    "next": 5.573512466,
+    "setup": 0.191982691,
+    "compile": 0.004425063,
+    "calls": 649105
+  },
+  {
+    "label": "baseline-profile",
+    "strategy": "otter",
+    "repeat": 1,
+    "wall": 5.546263416996226,
+    "log": "baseline-profile-otter-1.log",
+    "command": [
+      "./vampire",
+      "-sa",
+      "otter",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "6827d5a40122683ccec8bf472781faaf49061ff1353efce68b8cdd837346166f",
+    "elapsed": 5.539,
+    "next": 4.774452867,
+    "setup": 0.070252396,
+    "compile": 0.189693421,
+    "calls": 226159
+  },
+  {
+    "label": "baseline-profile",
+    "strategy": "discount",
+    "repeat": 2,
+    "wall": 7.8208765420131385,
+    "log": "baseline-profile-discount-2.log",
+    "command": [
+      "./vampire",
+      "-sa",
+      "discount",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "6827d5a40122683ccec8bf472781faaf49061ff1353efce68b8cdd837346166f",
+    "elapsed": 7.811,
+    "next": 5.593396557,
+    "setup": 0.185775147,
+    "compile": 0.003965561,
+    "calls": 649105
+  },
+  {
+    "label": "baseline-profile",
+    "strategy": "otter",
+    "repeat": 2,
+    "wall": 5.534586999972817,
+    "log": "baseline-profile-otter-2.log",
+    "command": [
+      "./vampire",
+      "-sa",
+      "otter",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "6827d5a40122683ccec8bf472781faaf49061ff1353efce68b8cdd837346166f",
+    "elapsed": 5.527,
+    "next": 4.755385095,
+    "setup": 0.070246354,
+    "compile": 0.191223247,
+    "calls": 226159
+  },
+  {
+    "label": "baseline-profile",
+    "strategy": "discount",
+    "repeat": 3,
+    "wall": 7.7827770410222,
+    "log": "baseline-profile-discount-3.log",
+    "command": [
+      "./vampire",
+      "-sa",
+      "discount",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "6827d5a40122683ccec8bf472781faaf49061ff1353efce68b8cdd837346166f",
+    "elapsed": 7.773,
+    "next": 5.58511306,
+    "setup": 0.183831744,
+    "compile": 0.003921995,
+    "calls": 649105
+  },
+  {
+    "label": "baseline-profile",
+    "strategy": "otter",
+    "repeat": 3,
+    "wall": 5.508196834009141,
+    "log": "baseline-profile-otter-3.log",
+    "command": [
+      "./vampire",
+      "-sa",
+      "otter",
+      "--time_limit",
+      "900",
+      "/Users/synrom/Development/AutomatedDeduction/problems/condensed_detachment_4.p"
+    ],
+    "binary_sha256": "6827d5a40122683ccec8bf472781faaf49061ff1353efce68b8cdd837346166f",
+    "elapsed": 5.501,
+    "next": 4.738558472,
+    "setup": 0.069874451,
+    "compile": 0.18988181,
+    "calls": 226159
+  }
+]
