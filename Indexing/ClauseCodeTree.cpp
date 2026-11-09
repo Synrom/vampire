@@ -324,7 +324,10 @@ void ClauseCodeTree::rebuildOrdering()
       else if (!op->isSuccess() && !op->isFail()) {
         uint64_t extra = selected.at(op) & ~inherited;
         if (extra) {
-          code.push_back(CodeOp::getOrderPrune(extra));
+          uint64_t greater = extra & ((uint64_t{1} << CodeOp::ORDER_DEPTHS) - 1);
+          uint64_t smaller = extra & ~((uint64_t{1} << CodeOp::ORDER_DEPTHS) - 1);
+          if (greater) { code.push_back(CodeOp::getOrderPrune(greater)); }
+          if (smaller) { code.push_back(CodeOp::getOrderPrune(smaller)); }
           inherited |= extra;
         }
       }

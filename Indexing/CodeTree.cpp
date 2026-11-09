@@ -637,17 +637,19 @@ bool CodeTree::Matcher<removing, checkRange>::doOrderPrune() const
   if (!orderEnabled) { return true; }
   uint64_t constraints = op->orderConstraints();
   uint64_t candidate = uint64_t{1} << linfos[curLInfo].liIndex;
-  unsigned greater = constraints & ((uint64_t{1} << CodeOp::ORDER_DEPTHS) - 1);
-  unsigned smaller = constraints >> CodeOp::ORDER_DEPTHS;
-  while (greater) {
-    unsigned depth = std::countr_zero(greater);
-    if (!(greaterSupport[depth] & candidate)) { return false; }
-    greater &= greater - 1;
+  // Each instruction contains just one direction, selected by its nonzero half.
+  unsigned depths = constraints >> CodeOp::ORDER_DEPTHS;
+  const uint64_t* supports = smallerSupport;
+  if (!depths) {
+    depths = constraints;
+    supports = greaterSupport;
+  } else {
+    ASS(!(constraints & ((uint64_t{1} << CodeOp::ORDER_DEPTHS) - 1)));
   }
-  while (smaller) {
-    unsigned depth = std::countr_zero(smaller);
-    if (!(smallerSupport[depth] & candidate)) { return false; }
-    smaller &= smaller - 1;
+  while (depths) {
+    unsigned depth = std::countr_zero(depths);
+    if (!(supports[depth] & candidate)) { return false; }
+    depths &= depths - 1;
   }
   return true;
 }
