@@ -23,7 +23,8 @@ clause tree has been annotated. Hard kills/crashes cannot guarantee output.
 Use distinct paths for concurrent processes; counters and IDs are process-local.
 
 The analysis script writes `<prefix>.summary.json` and
-`<prefix>.correlations.csv`. Use `--output-prefix` to change that prefix.
+`<prefix>.correlations.csv`, plus `<prefix>.sites.csv` with every site ranked
+by rejections, aggregated rates, and cumulative rejection shares. Use `--output-prefix` to change that prefix.
 
 ## Identity and structural changes
 
@@ -52,6 +53,7 @@ clauses are inserted and removed. Zero-visit rows are retained.
 - `enabled_visits`: executions where ordering pruning was enabled. This is the
   denominator for `rejection_rate`; unsupported large query masks are excluded.
 - `rejections`: current query-literal candidates rejected **at this operation**.
+  Candidates are LitInfos: equality orientations and polarities are distinct.
   A candidate rejected earlier cannot contribute to a later operation.
 - `constraints_tested`: individual depth constraints examined before acceptance
   or the first failure; early exit is respected.

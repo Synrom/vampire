@@ -59,18 +59,33 @@ def analyze(path):
             'pearson_rejections': correlation(x, rejected, [1]*len(x)),
             'pearson_rejection_rate': correlation(x, rates, [1]*len(x)),
             'exposure_weighted_pearson_rate': correlation(x, rates, exposures)})
-    return summary, correlations
+    cumulative = 0
+    distribution = []
+    all_sites = sorted(sites.items(), key=lambda item: item[1]['rejections'], reverse=True)
+    for rank, (site, counts) in enumerate(all_sites, 1):
+        cumulative += counts['rejections']
+        distribution.append({'site_id': site, 'rank': rank, **counts,
+            'rejection_rate': counts['rejections']/counts['enabled_visits'] if counts['enabled_visits'] else None,
+            'share_of_rejections': counts['rejections']/total if total else None,
+            'cumulative_share_of_rejections': cumulative/total if total else None})
+    return summary, correlations, distribution
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('csv', type=Path)
     parser.add_argument('--output-prefix', type=Path)
     args = parser.parse_args()
-    summary, correlations = analyze(args.csv)
+    summary, correlations, distribution = analyze(args.csv)
     prefix = args.output_prefix or args.csv.with_suffix('')
     Path(str(prefix)+'.summary.json').write_text(json.dumps(summary, indent=2)+'\n')
     with open(str(prefix)+'.correlations.csv', 'w', newline='') as out:
         writer = csv.DictWriter(out, fieldnames=list(correlations[0]))
         writer.writeheader()
         writer.writerows(correlations)
+    with open(str(prefix)+'.sites.csv', 'w', newline='') as out:
+        fields = ['site_id', 'rank', 'visits', 'enabled_visits', 'rejections',
+                  'rejection_rate', 'share_of_rejections', 'cumulative_share_of_rejections']
+        writer = csv.DictWriter(out, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(distribution)
     print(json.dumps(summary, indent=2))
