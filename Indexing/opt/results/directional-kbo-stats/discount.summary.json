@@ -1,0 +1,135 @@
+{
+  "feature_epochs": 10354,
+  "sites": 3213,
+  "enabled_sites": 3089,
+  "never_visited_sites": 124,
+  "enabled_visits": 38847291,
+  "rejections": 21589684,
+  "zero_rejection_fraction": 0.06636451926189706,
+  "gini_rejections": 0.9247384396512339,
+  "top_sites": [
+    {
+      "site_id": "117",
+      "visits": 2749772,
+      "enabled_visits": 2749772,
+      "rejections": 1149448
+    },
+    {
+      "site_id": "20",
+      "visits": 2556578,
+      "enabled_visits": 2556578,
+      "rejections": 1046732
+    },
+    {
+      "site_id": "118",
+      "visits": 1278886,
+      "enabled_visits": 1278886,
+      "rejections": 808570
+    },
+    {
+      "site_id": "51",
+      "visits": 1000691,
+      "enabled_visits": 1000691,
+      "rejections": 782714
+    },
+    {
+      "site_id": "344",
+      "visits": 778115,
+      "enabled_visits": 778115,
+      "rejections": 700123
+    },
+    {
+      "site_id": "1987",
+      "visits": 736026,
+      "enabled_visits": 736026,
+      "rejections": 644110
+    },
+    {
+      "site_id": "606",
+      "visits": 1040041,
+      "enabled_visits": 1040041,
+      "rejections": 552110
+    },
+    {
+      "site_id": "576",
+      "visits": 587221,
+      "enabled_visits": 587221,
+      "rejections": 530469
+    },
+    {
+      "site_id": "309",
+      "visits": 412750,
+      "enabled_visits": 412750,
+      "rejections": 371914
+    },
+    {
+      "site_id": "47",
+      "visits": 693372,
+      "enabled_visits": 693372,
+      "rejections": 333623
+    },
+    {
+      "site_id": "42",
+      "visits": 605971,
+      "enabled_visits": 605971,
+      "rejections": 281082
+    },
+    {
+      "site_id": "474",
+      "visits": 594765,
+      "enabled_visits": 594765,
+      "rejections": 258433
+    },
+    {
+      "site_id": "62",
+      "visits": 508820,
+      "enabled_visits": 508820,
+      "rejections": 245311
+    },
+    {
+      "site_id": "235",
+      "visits": 630156,
+      "enabled_visits": 630156,
+      "rejections": 243638
+    },
+    {
+      "site_id": "53",
+      "visits": 513143,
+      "enabled_visits": 513143,
+      "rejections": 240848
+    },
+    {
+      "site_id": "2",
+      "visits": 474457,
+      "enabled_visits": 474457,
+      "rejections": 232613
+    },
+    {
+      "site_id": "364",
+      "visits": 616487,
+      "enabled_visits": 616487,
+      "rejections": 223363
+    },
+    {
+      "site_id": "248",
+      "visits": 254135,
+      "enabled_visits": 254135,
+      "rejections": 211359
+    },
+    {
+      "site_id": "12",
+      "visits": 218850,
+      "enabled_visits": 218850,
+      "rejections": 193687
+    },
+    {
+      "site_id": "139",
+      "visits": 495154,
+      "enabled_visits": 495154,
+      "rejections": 188506
+    }
+  ],
+  "top_1pct_share": 0.5074846857415791,
+  "top_5pct_share": 0.803364838503426,
+  "top_10pct_share": 0.8960504933745209
+}

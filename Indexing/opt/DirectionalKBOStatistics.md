@@ -106,3 +106,6 @@ as weights. Empty/constant features give blank correlations. Epochs from one
 site are dependent observations; these are descriptive statistics, not
 independent samples, significance tests, or causal estimates. Compare both
 counts and rates: exposure alone can make an instruction dominate raw pruning.
+
+Collected sample data and validation results are in
+[results/directional-kbo-stats/Results.md](results/directional-kbo-stats/Results.md).
