@@ -25,6 +25,7 @@
 #include "Kernel/TermIterators.hpp"
 
 #include "CodeTree.hpp"
+#include "CodeTreePruningStats.hpp"
 
 #define ISATTY 1
 #if ISATTY
@@ -634,22 +635,29 @@ bool CodeTree::Matcher<removing, checkRange>::execute()
 template<bool removing, bool checkRange>
 bool CodeTree::Matcher<removing, checkRange>::doOrderPrune() const
 {
-  if (!orderEnabled) { return true; }
+  unsigned tested = 0;
+  auto result = [&](bool accepted) {
+    CodeTreePruningStats::record(op, orderEnabled, !accepted, tested, linfoCnt, linfos[curLInfo].opposite);
+    return accepted;
+  };
+  if (!orderEnabled) { return result(true); }
   uint64_t constraints = op->orderConstraints();
   uint64_t candidate = uint64_t{1} << linfos[curLInfo].liIndex;
   unsigned greater = constraints & ((uint64_t{1} << CodeOp::ORDER_DEPTHS) - 1);
   unsigned smaller = constraints >> CodeOp::ORDER_DEPTHS;
   while (greater) {
     unsigned depth = std::countr_zero(greater);
-    if (!(greaterSupport[depth] & candidate)) { return false; }
+    ++tested;
+    if (!(greaterSupport[depth] & candidate)) { return result(false); }
     greater &= greater - 1;
   }
   while (smaller) {
     unsigned depth = std::countr_zero(smaller);
-    if (!(smallerSupport[depth] & candidate)) { return false; }
+    ++tested;
+    if (!(smallerSupport[depth] & candidate)) { return result(false); }
     smaller &= smaller - 1;
   }
-  return true;
+  return result(true);
 }
 
 template<bool removing, bool checkRange>
@@ -857,6 +865,7 @@ template struct CodeTree::Matcher<false, false>;
 
 CodeTree::~CodeTree()
 {
+  CodeTreePruningStats::retire(*this);
   static Stack<CodeOp*> top_ops;
   // each top_op is either a first op of a Block or a SearchStruct
   // but it cannot be both since SearchStructs don't occur inside blocks

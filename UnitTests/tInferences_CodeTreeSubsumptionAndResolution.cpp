@@ -414,3 +414,52 @@ TEST_FUN(directional_ordering_mutations)
   check();
   Ordering::unsetGlobalOrdering();
 }
+
+#include "Indexing/CodeTreePruningStats.hpp"
+
+TEST_FUN(directional_pruning_statistics_identity)
+{
+  MY_SYNTAX_SUGAR
+  using Indexing::CodeTree;
+  namespace Stats = Indexing::CodeTreePruningStats;
+  auto ord = KBO::testKBO();
+  Ordering::unsetGlobalOrdering();
+  ALWAYS(Ordering::trySetGlobalOrdering(SmartPtr<Ordering>(&ord, true)));
+  Indexing::ClauseCodeTree tree;
+  auto indexed = clause({p(f(x)), p(x)});
+  auto unrelated = clause({q(g(x)), q(x)});
+  auto query = clause({p(f(c)), p(c)});
+  auto run = [&] {
+    Indexing::ClauseCodeTree::ClauseMatcher matcher;
+    matcher.init(&tree, query, false);
+    int resolved;
+    ALWAYS(matcher.next(resolved) == indexed);
+    matcher.reset();
+  };
+  auto sites = [&] {
+    std::set<uint64_t> found;
+    std::vector<CodeTree::CodeOp*> todo{tree.getEntryPoint()};
+    while (!todo.empty()) {
+      auto op = todo.back(); todo.pop_back();
+      if (op->alternative()) { todo.push_back(op->alternative()); }
+      if (op->isSearchStruct()) {
+        for (auto target : op->getSearchStruct()->targets) { if (target) { todo.push_back(target); } }
+      } else {
+        if (op->isOrderPrune()) { ALWAYS(Stats::siteId(op)); found.insert(Stats::siteId(op)); }
+        if (!op->isSuccess() && !op->isFail()) { todo.push_back(op+1); }
+      }
+    }
+    return found;
+  };
+  tree.insert(indexed); run();
+  auto original = sites();
+  ALWAYS(!original.empty());
+  Stats::refresh(tree);
+  ALWAYS(sites() == original);
+  tree.insert(unrelated); run();
+  auto expanded = sites();
+  for (auto site : original) { ALWAYS(expanded.count(site)); }
+  tree.remove(unrelated); run();
+  ALWAYS(sites() == original);
+  Ordering::unsetGlobalOrdering();
+}

@@ -30,6 +30,7 @@
 
 #include "ClauseCodeTree.hpp"
 #include "CodeTreeProfile.hpp"
+#include "CodeTreePruningStats.hpp"
 
 #undef RSTAT_COLLECTION
 #define RSTAT_COLLECTION 0
@@ -65,6 +66,7 @@ ClauseCodeTree::ClauseCodeTree()
 
 void ClauseCodeTree::insert(Clause* cl)
 {
+  CodeTreePruningStats::invalidate(*this);
   CT_PROFILE(compile);
   // Insertion is three phases that do quite different things, and only their sum was
   // visible before. Each scope is entered once per inserted clause, so the three
@@ -343,12 +345,14 @@ void ClauseCodeTree::rebuildOrdering()
   };
   _entryPoint = firstOpToCodeBlock(rewrite(getEntryPoint(), 0));
   _orderingDirtyRoots.clear();
+  CodeTreePruningStats::refresh(*this);
 }
 
 //////////////// removal ////////////////////
 
 void ClauseCodeTree::remove(Clause* cl)
 {
+  CodeTreePruningStats::invalidate(*this);
   CT_PROFILE(compile);
   _orderingSummaries.clear();
   _orderingInherited.clear();

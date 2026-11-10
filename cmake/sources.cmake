@@ -181,6 +181,7 @@ set(SOURCES
     Indexing/ClauseCodeTree.hpp
     Indexing/ClauseVariantIndex.cpp
     Indexing/ClauseVariantIndex.hpp
+    Indexing/CodeTreePruningStats.cpp
     Indexing/CodeTree.cpp
     Indexing/CodeTree.hpp
     Indexing/CodeTreeInterfaces.hpp

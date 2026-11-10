@@ -16,6 +16,7 @@
 
 #include <iostream>
 #include "Indexing/CodeTreeProfile.hpp"
+#include "Indexing/CodeTreePruningStats.hpp"
 
 #include "Debug/RuntimeStatistics.hpp"
 
@@ -66,6 +67,7 @@ void Statistics::explainRefutationNotFound(std::ostream& out)
 
 void Statistics::print(std::ostream& out)
 {
+  Indexing::CodeTreePruningStats::writeCsv();
 #ifdef CODETREE_ORDER_PROFILE
   Indexing::CodeTreeProfile::report();
 #endif
