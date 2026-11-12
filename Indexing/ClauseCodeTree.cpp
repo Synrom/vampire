@@ -115,6 +115,7 @@ void ClauseCodeTree::insert(Clause* cl)
     incorporate(code);
   }
   ASS(code.isEmpty());
+  rebuildOrdering();
 }
 
 struct ClauseCodeTree::InitialLiteralOrderingComparator
@@ -256,7 +257,7 @@ void ClauseCodeTree::matchCode(CodeStack& code, CodeOp* startOp, size_t& matched
 // Recompute the common constraints of each continuation, then emit only the
 // difference from constraints already tested on that path. Compilation scratch
 // maps disappear before retrieval: ordinary CodeOps carry no ordering metadata.
-// Rebuilding is deferred until retrieval, so consecutive mutations are batched.
+// Rebuild after each mutation so retrieval uses the prepared instruction graph.
 void ClauseCodeTree::rebuildOrdering()
 {
   if (!_orderingDirty || isEmpty()) { return; }
@@ -371,6 +372,7 @@ void ClauseCodeTree::remove(Clause* cl)
       ASSERTION_VIOLATION;
       INVALID_OPERATION("empty clause to be removed was not found");
     }
+    rebuildOrdering();
     return;
   }
 
@@ -429,6 +431,7 @@ void ClauseCodeTree::remove(Clause* cl)
   for(unsigned i=0;i<clen;i++) {
     lInfos[i].dispose();
   }
+  rebuildOrdering();
 }
 
 void ClauseCodeTree::RemovingLiteralMatcher::init(CodeOp* entry_, LitInfo* linfos_,
@@ -626,7 +629,6 @@ void ClauseCodeTree::ClauseMatcher::init(ClauseCodeTree* tree_, Clause* query_, 
 
   ASS(!tree_->isEmpty());
 
-  tree_->rebuildOrdering();
   query=query_;
   tree=tree_;
   sres=sres_;
