@@ -10,7 +10,7 @@ never own alternatives.
 
 Compilation compares indexed literals before renaming, with their shared
 clause-variable identities intact. `ILStruct` holds the resulting relations.
-A deferred annotation pass walks the tree, intersects relations over each
+An annotation pass walks the tree, intersects relations over each
 shared continuation, and inserts only constraints not already checked along
 that literal's path. Checks follow structural operations, including divergence
 points, rather than being confined to `LIT_END`. Alternative branches inherit
@@ -18,8 +18,9 @@ the constraints from before the operation. No ordinary operation retains
 ordering metadata: the pass's scratch map is discarded before matching.
 
 Insertion and literal-order optimization skip pruning instructions. Removal
-interprets them as no-ops. The next query rebuilds annotations after mutations;
-consecutive updates are batched. Compilation is outside `ClauseMatcher::next`. A cache per block/search
+interprets them as no-ops. Each insert and remove rebuilds annotations before
+returning, including empty-clause removal. Matcher initialization uses the
+prepared tree without rebuilding it. A cache per block/search
 structure lets insertion revisit only touched paths, plus descendants whose
 inherited constraints changed. Removal and search-structure compression
 currently invalidate these caches and can cost O(tree size).
@@ -48,7 +49,7 @@ above the bitset capacity.
 
 For diagnostic builds, `-DCODETREE_ORDER_PROFILE=ON` reports cumulative time
 inside `ClauseMatcher::next`, query initialization, and insert/remove, along
-with the number of next calls. Initialization includes deferred compilation.
+with the number of next calls. Insert/remove timing includes annotation rebuilding.
 The option is off by default and adds no timer code to normal builds.
 `scripts/benchmark_directional_kbo.py LABEL` runs both requested commands
 serially three times and saves raw logs and JSON measurements.
