@@ -397,6 +397,8 @@ TEST_FUN(directional_ordering_mutations)
     return found;
   };
   auto check = [&]() {
+    std::ostringstream before;
+    before << tree;
     for (auto query : queries) {
       for (bool resolution : {false, true}) {
         auto expected = results(query, resolution, false);
@@ -404,12 +406,30 @@ TEST_FUN(directional_ordering_mutations)
         ALWAYS(actual == expected);
       }
     }
+    std::ostringstream after;
+    after << tree;
+    ALWAYS(before.str() == after.str());
   };
   for (auto cl : indexed) { tree.insert(cl); check(); }
   std::ostringstream printed;
   printed << tree;
   ALWAYS(printed.str().find("ORDER_PRUNE") != std::string::npos);
   for (auto cl : indexed) { tree.remove(cl); if (!tree.isEmpty()) { check(); } }
+  for (auto cl : indexed) { tree.insert(cl); }
+  // Mutations must prepare pruning instructions before any matcher is initialized.
+  std::ostringstream prepared;
+  prepared << tree;
+  ALWAYS(prepared.str().find("ORDER_PRUNE") != std::string::npos);
+  check();
+  // Exercise the early return in removal, including removing the last clause.
+  auto empty = clause({});
+  tree.insert(empty);
+  tree.remove(empty);
+  check();
+  for (auto cl : indexed) { tree.remove(cl); }
+  tree.insert(empty);
+  tree.remove(empty);
+  ALWAYS(tree.isEmpty());
   for (auto cl : indexed) { tree.insert(cl); }
   check();
   Ordering::unsetGlobalOrdering();
