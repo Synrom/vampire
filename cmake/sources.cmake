@@ -180,6 +180,7 @@ set(SOURCES
     Indexing/AcyclicityIndex.cpp
     Indexing/AcyclicityIndex.hpp
     Indexing/ClauseCodeTree.cpp
+    Indexing/CodeTreeDataset.cpp
     Indexing/ClauseCodeTree.hpp
     Indexing/ClauseVariantIndex.cpp
     Indexing/ClauseVariantIndex.hpp

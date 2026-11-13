@@ -22,9 +22,12 @@
 #include "Lib/Stack.hpp"
 
 #include "CodeTree.hpp"
+#include <memory>
 
 
 namespace Indexing {
+
+class CodeTreeDataset;
 
 using namespace Lib;
 using namespace Kernel;
@@ -37,11 +40,15 @@ protected:
   
 public:
   ClauseCodeTree();
+  ~ClauseCodeTree();
 
-  void insert(Clause* cl);
+  // Replay may supply the literal permutation chosen during original insertion.
+  void insert(Clause* cl, const unsigned* literalOrder = nullptr);
   void remove(Clause* cl);
 
 private:
+
+  std::unique_ptr<CodeTreeDataset> _dataset;
 
   //////// insertion //////////
 

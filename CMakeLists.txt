@@ -247,6 +247,10 @@ add_library(common OBJECT ${SOURCES})
 # the actual Vampire executable
 add_executable(vampire vampire.cpp $<TARGET_OBJECTS:common>)
 
+add_executable(codetree-replay tools/codetree/replay.cpp $<TARGET_OBJECTS:common>)
+add_executable(codetree-dataset-fixture EXCLUDE_FROM_ALL
+  tools/codetree/fixture.cpp $<TARGET_OBJECTS:common>)
+
 install(TARGETS vampire)
 
 ################################################################

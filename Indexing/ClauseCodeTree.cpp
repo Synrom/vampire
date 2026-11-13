@@ -26,6 +26,7 @@
 #include "Kernel/Term.hpp"
 
 #include "ClauseCodeTree.hpp"
+#include "CodeTreeDataset.hpp"
 
 #undef RSTAT_COLLECTION
 #define RSTAT_COLLECTION 0
@@ -51,15 +52,18 @@ void ClauseCodeTree::printSuccess(std::ostream& out, const CodeOp& op) const
 
 ClauseCodeTree::ClauseCodeTree()
 {
+  _dataset = CodeTreeDataset::create();
   _clauseCodeTree = true;
 #if VDEBUG
   _clauseMatcherCounter=0;
 #endif
 }
 
+ClauseCodeTree::~ClauseCodeTree() = default;
+
 //////////////// insertion ////////////////////
 
-void ClauseCodeTree::insert(Clause* cl)
+void ClauseCodeTree::insert(Clause* cl, const unsigned* literalOrder)
 {
   // Insertion is three phases that do quite different things, and only their sum was
   // visible before. Each scope is entered once per inserted clause, so the three
@@ -75,7 +79,11 @@ void ClauseCodeTree::insert(Clause* cl)
     // code against the tree (evalSharing) -- and it compiles all of them to do so, so
     // the compilation below is the second time each literal is compiled.
     TIME_TRACE("codetree literal ordering");
-    optimizeLiteralOrder(lits);
+    if (literalOrder) {
+      for (unsigned i = 0; i < clen; ++i) lits[i] = (*cl)[literalOrder[i]];
+    } else {
+      optimizeLiteralOrder(lits);
+    }
   }
 
   CodeStack code;
@@ -100,6 +108,7 @@ void ClauseCodeTree::insert(Clause* cl)
     incorporate(code);
   }
   ASS(code.isEmpty());
+  if (_dataset) _dataset->insert(cl, lits.array());
 }
 
 struct ClauseCodeTree::InitialLiteralOrderingComparator
@@ -241,6 +250,7 @@ void ClauseCodeTree::matchCode(CodeStack& code, CodeOp* startOp, size_t& matched
 
 void ClauseCodeTree::remove(Clause* cl)
 {
+  if (_dataset) _dataset->remove(cl);
   static DArray<LitInfo> lInfos;
   Recycled<Stack<CodeOp*>> firstsInBlocks;
   Recycled<Stack<Recycled<RemovingLiteralMatcher, NoReset>>> rlms;
@@ -489,6 +499,7 @@ void ClauseCodeTree::LiteralMatcher::recordMatch()
  */
 void ClauseCodeTree::ClauseMatcher::init(ClauseCodeTree* tree_, Clause* query_, bool sres_)
 {
+  if (tree_->_dataset) tree_->_dataset->query(query_, sres_);
   // "codetree forward subsumption" is 18% of a sweep's instructions and was one opaque
   // number. These three scopes -- setup here, teardown in reset(), and the multi-literal
   // matching in checkCandidate() -- cut it into the parts that are not the code-tree
