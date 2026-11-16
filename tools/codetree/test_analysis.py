@@ -3,17 +3,31 @@
 import csv
 from pathlib import Path
 import subprocess
+import shutil
+from threading import Barrier
+from types import SimpleNamespace
 import sys
 import tempfile
 import unittest
 import numpy as np
 import pandas as pd
-from analyze import classify_frames, concentration, parse_perf, query_weights
+from analyze import analyze_trees, classify_frames, concentration, parse_perf, query_weights, run_trees
 
 BUILD = Path(sys.argv.pop(1)).resolve() if len(sys.argv)>1 else None
 
 
 class Statistics(unittest.TestCase):
+    def test_parallel_scheduler(self):
+        barrier = Barrier(2)
+        def worker(value):
+            barrier.wait(timeout=5)  # Fails if the scheduler serializes the work.
+            return value * 2
+        self.assertEqual(run_trees(worker, [3, 1], 2, 'test workers'), [6, 2])
+        def fail(value):
+            raise RuntimeError('worker failed')
+        with self.assertRaisesRegex(RuntimeError, 'worker failed'):
+            run_trees(fail, [1, 2], 1, 'test failure')
+
     def test_weighting(self):
         q = pd.DataFrame(dict(algorithm=['otter']*3+['discount'], problem=['a','a','b','a'],
                               weight=[90,10,1,2]))
@@ -67,6 +81,19 @@ class Statistics(unittest.TestCase):
                 self.assertEqual((hot.value*hot['count']).sum(),row.expanded_ops)
                 branches = h[(h['query']==row.query)&(h.metric=='branching')]
                 self.assertEqual(branches['count'].sum(),row.logical_ops)
+            shutil.copytree(tmp/'dataset', tmp/'dataset2')
+            trees = [tmp/'dataset/tree-0', tmp/'dataset2/tree-0']
+            for cpus in [1, 2]:
+                args = SimpleNamespace(output=tmp/f'workers-{cpus}', cpus=cpus, mode='all')
+                analyze_trees(args, BUILD/'codetree-replay', trees)
+            for filename in ['queries.csv', 'histograms.csv']:
+                one = pd.read_csv(tmp/'workers-1'/filename)
+                two = pd.read_csv(tmp/'workers-2'/filename)
+                if filename == 'queries.csv':
+                    one = one.drop(columns='total_ns')
+                    two = two.drop(columns='total_ns')
+                pd.testing.assert_frame_equal(one, two)
+
 
 
 if __name__ == '__main__':

@@ -2,6 +2,7 @@
 """Replay a CTD collection, export exact distributions, plot, then sample with perf."""
 import argparse
 import csv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import importlib.util
 import json
@@ -79,6 +80,7 @@ def stream_replay(command, destination, log, progress):
             if process.poll() is None:
                 process.terminate()
                 process.wait()
+            process.stdout.close()
 
 
 def parse_perf(lines):
@@ -111,10 +113,63 @@ def classify_frames(frames):
     return matched
 
 
+def run_trees(worker, trees, cpus, description):
+    """Supervise independent replay processes; preserve input order in exports.
+
+    Threads only supervise subprocesses/I/O. CPU-heavy matching runs in the
+    separate C++ processes, so Python's GIL does not serialize the replay.
+    """
+    from tqdm import tqdm
+    results = [None] * len(trees)
+    with ThreadPoolExecutor(max_workers=cpus) as pool:
+        pending = {pool.submit(worker, tree): i for i, tree in enumerate(trees)}
+        try:
+            with tqdm(total=len(trees), desc=description, unit='tree', position=0) as progress:
+                for future in as_completed(pending):
+                    results[pending[future]] = future.result()
+                    progress.update(1)
+        except BaseException:
+            for future in pending:
+                future.cancel()
+            raise
+    return results
+
+
+def query_count(trees):
+    total = 0
+    for tree in trees:
+        with (tree / 'sample.ctd').open() as sample:
+            total += sum(line.startswith('Q ') for line in sample)
+    return total
+
+
+def analyze_trees(args, exe, trees):
+    from tqdm import tqdm
+    import pandas as pd
+
+    def worker(tree):
+        key = hashlib.sha256(str(tree).encode()).hexdigest()[:16]
+        folder = args.output / 'raw' / key
+        folder.mkdir(parents=True)
+        command = [exe, tree, '--analysis-dir', folder]
+        if args.mode == 'all': command.append('--all')
+        stream_replay(command, folder/'queries.csv', folder/'replay.log', progress)
+        return folder
+
+    with tqdm(total=query_count(trees), desc='Analysis queries', unit='query', position=1) as progress:
+        folders = run_trees(worker, trees, args.cpus, 'Analysis trees')
+    # Merge after workers finish, in dataset order regardless of completion order.
+    qframes = [pd.read_csv(folder/'queries.csv') for folder in folders]
+    hframes = [pd.read_csv(folder/'histograms.csv').assign(dataset=str(tree))
+               for tree, folder in zip(trees, folders)]
+    pd.concat(qframes, ignore_index=True).to_csv(args.output/'queries.csv', index=False)
+    pd.concat(hframes, ignore_index=True).to_csv(args.output/'histograms.csv', index=False)
+
+
 def profile(args, exe, trees):
     from tqdm import tqdm
-    rows = []
-    for tree in tqdm(trees, desc='perf trees'):
+    def worker(tree):
+        rows = []
         key = hashlib.sha256(str(tree).encode()).hexdigest()[:16]
         folder = args.output / 'raw' / key
         data = folder / 'perf.data'
@@ -123,8 +178,7 @@ def profile(args, exe, trees):
                    '--call-graph', 'dwarf,16384', '-D', '-1', '-o', data, '--', exe,
                    tree, '--profile', '--repeat', args.profile_repeat, *mode]
         # Events start disabled. Replay enables them only around matcher execution.
-        with tqdm(desc=f'profile {key}', unit='query', leave=False) as progress:
-            stream_replay(command, folder / 'profile_queries.csv', folder / 'perf.log', progress)
+        stream_replay(command, folder / 'profile_queries.csv', folder / 'perf.log', progress)
         checked(['perf', 'script', '-i', data, '-F', 'period,event,ip,sym'], folder / 'perf.script')
         counts = {}
         total = 0
@@ -146,8 +200,12 @@ def profile(args, exe, trees):
                 samples, ns = counts.get((view, cat), (0, 0))
                 rows.append(dict(dataset=str(tree), view=view, category=cat, samples=samples,
                                  estimated_cpu_ns=ns, repeats=args.profile_repeat))
+        return rows
+
+    with tqdm(total=query_count(trees), desc='Profile queries', unit='query', position=1) as progress:
+        results = run_trees(worker, trees, args.profile_cpus, 'perf trees')
     import pandas as pd
-    pd.DataFrame(rows).to_csv(args.output / 'profile.csv', index=False)
+    pd.DataFrame([row for rows in results for row in rows]).to_csv(args.output / 'profile.csv', index=False)
 
 
 def query_weights(q):
@@ -418,7 +476,12 @@ def main():
     parser.add_argument('--build-root', type=Path, default=REPO / 'build-codetree-analysis')
     parser.add_argument('--analysis-binary', type=Path)
     parser.add_argument('--profile-binary', type=Path)
-    parser.add_argument('--jobs', type=int, default=min(os.cpu_count() or 1, 8))
+    parser.add_argument('--jobs', type=int, default=min(os.cpu_count() or 1, 8),
+                        help='Parallel compiler jobs (independent of replay workers)')
+    parser.add_argument('--cpus', type=int, default=1,
+                        help='Concurrent analysis tree processes (default: 1)')
+    parser.add_argument('--profile-cpus', type=int, default=1,
+                        help='Concurrent perf tree processes (default: 1 to limit contention)')
     parser.add_argument('--mode', choices=['all','first'], default='all')
     parser.add_argument('--skip-perf', action='store_true')
     parser.add_argument('--profile-repeat', type=int, default=1000)
@@ -428,8 +491,8 @@ def main():
     missing = [m for m in ['numpy','pandas','matplotlib','tqdm'] if importlib.util.find_spec(m) is None]
     if missing:
         parser.error('Missing ' + ', '.join(missing) + '; install with: python3 -m pip install -r tools/codetree/requirements-analysis.txt')
-    if min(args.jobs, args.profile_repeat, args.frequency) <= 0:
-        parser.error('jobs, profile-repeat and frequency must be positive')
+    if min(args.jobs, args.cpus, args.profile_cpus, args.profile_repeat, args.frequency) <= 0:
+        parser.error('jobs, cpus, profile-cpus, profile-repeat and frequency must be positive')
     args.output = args.output.resolve()
     if args.plots_only:
         plots(args.output); return
@@ -453,23 +516,8 @@ def main():
     manifest['git_head'] = subprocess.run(['git','-C',REPO,'rev-parse','HEAD'], text=True,capture_output=True).stdout.strip()
     (args.output/'manifest.json').write_text(json.dumps(manifest, indent=2))
     analysis = binary(args, 'analysis')
-    from tqdm import tqdm
     import pandas as pd
-    qframes, hframes = [], []
-    for tree in tqdm(trees, desc='Analysis trees'):
-        key = hashlib.sha256(str(tree).encode()).hexdigest()[:16]
-        folder = args.output / 'raw' / key
-        folder.mkdir(parents=True)
-        with (tree/'sample.ctd').open() as sample:
-            nqueries = sum(line.startswith('Q ') for line in sample)
-        command = [analysis, tree, '--analysis-dir', folder]
-        if args.mode == 'all': command.append('--all')
-        with tqdm(total=nqueries, desc=key, unit='query', leave=False) as progress:
-            stream_replay(command, folder/'queries.csv', folder/'replay.log', progress)
-        qframes.append(pd.read_csv(folder/'queries.csv'))
-        hframes.append(pd.read_csv(folder/'histograms.csv').assign(dataset=str(tree)))
-    pd.concat(qframes, ignore_index=True).to_csv(args.output/'queries.csv', index=False)
-    pd.concat(hframes, ignore_index=True).to_csv(args.output/'histograms.csv', index=False)
+    analyze_trees(args, analysis, trees)
     plots(args.output)
     if not args.skip_perf:
         profile(args, binary(args, 'profile'), trees)

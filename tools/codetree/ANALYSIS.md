@@ -20,9 +20,27 @@ because symbol IDs belong to individual datasets. Empty checkpoints are skipped.
 Progress bars show trees and queries. Build and replay logs are retained.
 Use a new/empty output directory for each run.
 
+Use `--cpus N` to replay up to N independent trees concurrently during analysis.
+Each worker is a separate single-threaded C++ process; queries within one tree
+remain sequential. CSV ordering is deterministic regardless of completion order.
+Progress bars aggregate completed trees and queries across workers. Memory use
+increases with the number of concurrent reconstructed trees. Plotting remains
+sequential. This is a worker limit, not CPU affinity or a CPU limit for the build.
+
+Profiling defaults to one worker to limit cache/memory contention in measurements.
+Use `--profile-cpus N` to parallelize that pass too; resulting CPU shares describe
+that concurrent workload. `--jobs N` independently controls compiler parallelism.
+Both replay worker options default to 1, preserving the previous behavior.
+
 Useful options:
 
 ```sh
+# Parallel analysis with 16 workers (profiling stays sequential):
+python tools/codetree/analyze.py DATASET --output RESULTS --cpus 16
+
+# Parallelize both passes:
+python tools/codetree/analyze.py DATASET --output RESULTS --cpus 16 --profile-cpus 16
+
 # Analysis on macOS, or analysis without CPU profiling:
 python tools/codetree/analyze.py DATASET --output RESULTS --skip-perf
 
@@ -201,4 +219,6 @@ python tools/codetree/test_analysis.py build-dataset
 Tests cover alternative-chain branching, compressed targets with null holes,
 block ends, zero-hit nodes, zero-based depth, expansion/hit conservation,
 unequal query/problem weights, known concentration extremes, perf-text parsing,
-and replay result preservation against fixture expectations and the SAT oracle.
+replay result preservation against fixture expectations and the SAT oracle,
+concurrent scheduling/error propagation, and identical serial/parallel CSVs
+(excluding elapsed timings).
