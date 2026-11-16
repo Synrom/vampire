@@ -45,6 +45,8 @@ public:
   // Replay may supply the literal permutation chosen during original insertion.
   void insert(Clause* cl, const unsigned* literalOrder = nullptr);
   void remove(Clause* cl);
+  bool recordingQueries() const { return bool(_dataset); }
+  void recordQuery(Clause* cl, bool subsumptionResolution, uint64_t cpuNs);
 
 private:
 

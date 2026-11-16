@@ -105,8 +105,9 @@ lifetime hotness for a supposedly persistent node.
 
 For each algorithm separately:
 
-1. **Query average**: give query `q` weight `population / retained` from its
-   reservoir bucket. Scalar metrics use a point mass at the measured value.
+1. **Query average**: use the CSV `weight` (CTD1: bucket population/retained;
+   CTD2: inverse-probability query-count contribution). In baseline-time mode,
+   use `time_weight` instead. Scalar metrics use a point mass at the measured value.
    Tree metrics first normalize that query's node histogram to mass 1; a large
    tree does not automatically outweigh a small tree. Average these distributions
    with the query weights.
@@ -149,7 +150,7 @@ No confidence intervals or sampling-variance estimates are claimed.
   Its `total_ns` includes instrumentation overhead and is **not a benchmark**.
 * `histograms.csv`: exact `(dataset, query, metric, value, count)` histograms.
   Join to `queries.csv` on `(dataset, query)` for all weighting/provenance.
-* `distributions.csv`: plotted exact probabilities and CDFs for both weightings.
+* `distributions.csv`: plotted estimated probabilities and CDFs for both weighting views.
 * `problem_summary.csv`: per-problem means, medians, p90 and p99 by metric.
 * `*_problem_cdfs.csv`: problem identities and CDF values on the heatmap grid.
 * `query_concentration.csv`, `problem_concentration.csv`, `lorenz.csv`, and
@@ -212,8 +213,10 @@ leave time in `other`; retain and inspect the perf logs and raw stacks.
 cmake -S . -B build-dataset -DCMAKE_BUILD_TYPE=Release -DCT_ANALYSIS=ON \
   -DCMAKE_DISABLE_FIND_PACKAGE_Z3=ON
 cmake --build build-dataset --target codetree-replay codetree-dataset-fixture codetree-analysis-test -j 8
-python tools/codetree/test_dataset.py build-dataset
-python tools/codetree/test_analysis.py build-dataset
+# Build the separate normal capture targets as documented in README.md.
+python tools/codetree/test_dataset.py build-codetree-capture
+python tools/codetree/test_analysis.py build-dataset build-codetree-capture
+python tools/codetree/test_capture.py
 ```
 
 Tests cover alternative-chain branching, compressed targets with null holes,
@@ -222,3 +225,27 @@ unequal query/problem weights, known concentration extremes, perf-text parsing,
 replay result preservation against fixture expectations and the SAT oracle,
 concurrent scheduling/error propagation, and identical serial/parallel CSVs
 (excluding elapsed timings).
+
+## Time-proportional datasets (CTD2)
+
+New captures use time-proportional sampling with replacement. Use the paired
+commands in [README.md](README.md): `capture.py TPTP_ROOT --cpus N`, then
+`analyze_dataset.py CAPTURE --cpus N`. The wrapper defaults to baseline-time
+weighting and first-match execution; `analyze.py` keeps its query-weighting and
+exhaustive defaults for compatibility. Select either measure explicitly with
+`--weighting query|baseline-time`. CTD1 remains readable in query mode.
+
+For CTD2, the CSV's `weight` is the inverse-probability query-count contribution,
+not the old bucket population/retained ratio. `time_weight` is the represented
+baseline CPU-time contribution, and `multiplicity` records duplicate draws.
+Distribution plots are sample estimates; exact instruction counts for retained
+queries do not make the inferred full-population distribution exact. Raw perf
+plots describe the unique-query replay workload, not population CPU time.
+
+Capture and analysis must use separate builds. The capture build rejects
+CT_ANALYSIS, CT_PROFILE, and TIME_PROFILING instrumentation. Integration tests
+now take both build paths:
+
+```sh
+python3 tools/codetree/test_analysis.py ANALYSIS_BUILD NORMAL_CAPTURE_BUILD
+```

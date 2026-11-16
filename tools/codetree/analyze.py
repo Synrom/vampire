@@ -40,7 +40,9 @@ def binary(args, mode):
         build = args.build_root / mode
         print(f'Building {mode} replay (logs in {args.output})', flush=True)
         checked(['cmake', '-S', REPO, '-B', build, '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
-                 '-DCMAKE_DISABLE_FIND_PACKAGE_Z3=ON', '-DCT_' + mode.upper() + '=ON',
+                 '-DCMAKE_DISABLE_FIND_PACKAGE_Z3=ON', '-DTIME_PROFILING=OFF',
+                 '-DCT_ANALYSIS=' + ('ON' if mode == 'analysis' else 'OFF'),
+                 '-DCT_PROFILE=' + ('ON' if mode == 'profile' else 'OFF'),
                  '-DCMAKE_CXX_FLAGS=-fno-omit-frame-pointer -fno-optimize-sibling-calls'],
                 args.output / f'configure-{mode}.log')
         checked(['cmake', '--build', build, '--target', 'codetree-replay', '-j', args.jobs],
@@ -208,13 +210,23 @@ def profile(args, exe, trees):
     pd.DataFrame([row for rows in results for row in rows]).to_csv(args.output / 'profile.csv', index=False)
 
 
-def query_weights(q):
-    """Query-population and equal-problem weights, normalized within algorithm."""
+def query_weights(q, weighting='query'):
+    """Normalize the selected population measure, separately within algorithm.
+
+    CTD2 weight is a Hansen-Hurwitz query-count contribution; time_weight is
+    multiplicity * total_baseline_cpu_ns / draws. Normalized query estimates
+    are self-normalized (not exactly unbiased at finite sample size).
+    """
     q = q.copy()
+    if weighting == 'baseline-time':
+        if 'time_weight' not in q or not (q.time_weight > 0).all():
+            raise RuntimeError('Baseline-time analysis requires CTD2 time-sampled datasets throughout')
+        q['weight'] = q.time_weight
     q['query_weight'] = q.weight / q.groupby('algorithm').weight.transform('sum')
     totals = q.groupby(['algorithm', 'problem']).weight.transform('sum')
     nproblems = q.groupby('algorithm').problem.transform('nunique')
     q['problem_weight'] = q.weight / totals / nproblems
+    q.attrs['weighting'] = weighting
     return q
 
 
@@ -238,6 +250,12 @@ def savefig(fig, path):
     plt.close(fig)
 
 
+def view_label(q, view):
+    if q.attrs.get('weighting') == 'baseline-time':
+        return 'baseline-time average' if view == 'query' else 'equal-problem baseline-time average'
+    return view + ' average'
+
+
 def distribution_plots(q, h, out):
     import numpy as np
     import pandas as pd
@@ -259,7 +277,7 @@ def distribution_plots(q, h, out):
         d['mass'] = d['count'] / d.groupby(keys)['count'].transform('sum')
         d = d.merge(meta, on=keys, validate='many_to_one')
         fig, axes = plt.subplots(2, 3, figsize=(16, 9), constrained_layout=True)
-        fig.suptitle(metric + ' — exact weighted distributions; both algorithms shown separately')
+        fig.suptitle(metric + ' — sample estimates, ' + q.attrs.get('weighting', 'query') + ' weighting')
         perproblem = []
         for (algo, problem), group in d.groupby(['algorithm', 'problem']):
             # Normalize within this problem, summing all its runs/tree populations.
@@ -278,7 +296,7 @@ def distribution_plots(q, h, out):
                 dist = mass.groupby(group.value).sum().sort_index()
                 dist /= dist.sum()
                 x, p = dist.index.to_numpy(), dist.to_numpy()
-                label = f'{algo}: {view} average'
+                label = f'{algo}: ' + view_label(q, view)
                 style = '-' if view == 'query' else '--'
                 axes[0,0].plot(x, p, '.', ms=3, label=label)
                 axes[0,1].step(x, np.cumsum(p), where='post', ls=style, label=label)
@@ -383,7 +401,7 @@ def hotness_plots(q, h, out):
             if valid.empty: continue
             weights = query_weights(valid)[view + '_weight'].to_numpy()
             mean = np.average(curves[valid.index], axis=0, weights=weights)
-            axes[0].plot(grid, mean, label=f'{algo}: {view} average')
+            axes[0].plot(grid, mean, label=f'{algo}: ' + view_label(q, view))
             records.extend(dict(algorithm=algo, view=view, op_fraction=x, execution_fraction=y)
                            for x,y in zip(grid,mean))
         axes[1].scatter(group.logical_ops, group.top_1pct, s=9, alpha=.3, label=algo)
@@ -427,12 +445,13 @@ def workload_plot(q, out):
             if not work.sum(): continue
             x = np.r_[0, np.cumsum(w)/sum(w)]
             y = np.r_[0, np.cumsum(work)/sum(work)]
-            axes[0].plot(x,y,label=f'{algo}: {view} average')
+            axes[0].plot(x,y,label=f'{algo}: ' + view_label(q, view))
             records.extend(dict(algorithm=algo, view=view, query_fraction=a, execution_fraction=b)
                            for a,b in zip(x,y))
         axes[1].scatter(group.max_ils_depth, group.expanded_ops, s=8, alpha=.25, label=algo)
     axes[0].plot([0,1],[0,1],':',color='gray')
-    axes[0].set(xlabel='Weighted fraction of queries, cheapest first', ylabel='Fraction of expanded execution work', title='Do a few queries dominate the work?')
+    axes[0].set(xlabel='Fraction of selected measure, cheapest first', ylabel='Fraction of weighted expanded execution work',
+                title='Work concentration (' + q.attrs.get('weighting', 'query') + ' weighting)')
     axes[0].legend(fontsize=8)
     axes[1].set(xlabel='Maximum ILStruct depth (-1 = none)', ylabel='Expanded executions', title='Raw retained queries: depth versus work')
     axes[1].set_yscale('symlog', linthresh=1); axes[1].legend()
@@ -440,12 +459,14 @@ def workload_plot(q, out):
     pd.DataFrame(records).to_csv(out/'query_work_concentration.csv', index=False)
 
 
-def plots(out):
+def plots(out, weighting='query'):
     import pandas as pd
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    q = query_weights(pd.read_csv(out / 'queries.csv'))
+    q = query_weights(pd.read_csv(out / 'queries.csv'), weighting)
+    (out / 'weighting.json').write_text(json.dumps(dict(weighting=weighting,
+        note='Weighted sample estimates, not full-population observations. Query mode uses self-normalized inverse-probability weights.'), indent=2))
     h = pd.read_csv(out / 'histograms.csv')
     distribution_plots(q, h, out)
     hotness_plots(q, h, out)
@@ -465,7 +486,7 @@ def profile_plot(out, q):
             total = p[p.view == 'exclusive'].groupby('algorithm').estimated_cpu_ns.sum()
             table = table.divide(total, axis=1) * 100
             table.plot.barh(ax=ax)
-            ax.set_title(view + ' sampled CPU time'); ax.set_xlabel('% of all sampled query CPU time')
+            ax.set_title(view + ' replay-sample CPU time'); ax.set_xlabel('% of unweighted unique-query replay CPU time')
         savefig(fig, out / 'profile')
 
 
@@ -483,6 +504,8 @@ def main():
     parser.add_argument('--profile-cpus', type=int, default=1,
                         help='Concurrent perf tree processes (default: 1 to limit contention)')
     parser.add_argument('--mode', choices=['all','first'], default='all')
+    parser.add_argument('--weighting', choices=['query', 'baseline-time'], default='query',
+                        help='Query-frequency estimate or measured baseline CPU-time distribution (CTD2 only)')
     parser.add_argument('--skip-perf', action='store_true')
     parser.add_argument('--profile-repeat', type=int, default=1000)
     parser.add_argument('--frequency', type=int, default=999)
@@ -495,7 +518,7 @@ def main():
         parser.error('jobs, cpus, profile-cpus, profile-repeat and frequency must be positive')
     args.output = args.output.resolve()
     if args.plots_only:
-        plots(args.output); return
+        plots(args.output, args.weighting); return
     if args.output.exists() and any(args.output.iterdir()):
         parser.error('Output directory must be empty; use --plots-only to redraw existing CSVs')
     if not args.skip_perf:
@@ -518,7 +541,7 @@ def main():
     analysis = binary(args, 'analysis')
     import pandas as pd
     analyze_trees(args, analysis, trees)
-    plots(args.output)
+    plots(args.output, args.weighting)
     if not args.skip_perf:
         profile(args, binary(args, 'profile'), trees)
         profile_plot(args.output, pd.read_csv(args.output/'queries.csv'))

@@ -248,7 +248,7 @@ if(CT_ANALYSIS AND CT_PROFILE)
 endif()
 foreach(mode CT_ANALYSIS CT_PROFILE)
   if(${mode})
-    set_property(SOURCE Indexing/CodeTree.cpp Indexing/ClauseCodeTree.cpp
+    set_property(SOURCE Indexing/CodeTree.cpp Indexing/ClauseCodeTree.cpp Indexing/CodeTreeDataset.cpp
       tools/codetree/replay.cpp APPEND PROPERTY COMPILE_DEFINITIONS ${mode})
   endif()
 endforeach()
@@ -266,6 +266,8 @@ add_executable(codetree-dataset-fixture EXCLUDE_FROM_ALL
 add_executable(codetree-analysis-test EXCLUDE_FROM_ALL
   tools/codetree/test_analysis.cpp $<TARGET_OBJECTS:common>)
 target_compile_definitions(codetree-analysis-test PRIVATE CT_ANALYSIS)
+
+add_executable(codetree-time-sampler-test EXCLUDE_FROM_ALL tools/codetree/test_time_sampler.cpp)
 
 install(TARGETS vampire)
 

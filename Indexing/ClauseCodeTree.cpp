@@ -62,6 +62,11 @@ ClauseCodeTree::ClauseCodeTree()
 
 ClauseCodeTree::~ClauseCodeTree() = default;
 
+void ClauseCodeTree::recordQuery(Clause* cl, bool sres, uint64_t cpuNs)
+{
+  if (_dataset) _dataset->query(cl, sres, cpuNs);
+}
+
 //////////////// insertion ////////////////////
 
 void ClauseCodeTree::insert(Clause* cl, const unsigned* literalOrder)
@@ -503,7 +508,6 @@ void ClauseCodeTree::LiteralMatcher::recordMatch()
  */
 void ClauseCodeTree::ClauseMatcher::init(ClauseCodeTree* tree_, Clause* query_, bool sres_)
 {
-  if (tree_->_dataset) tree_->_dataset->query(query_, sres_);
   // "codetree forward subsumption" is 18% of a sweep's instructions and was one opaque
   // number. These three scopes -- setup here, teardown in reset(), and the multi-literal
   // matching in checkCandidate() -- cut it into the parts that are not the code-tree

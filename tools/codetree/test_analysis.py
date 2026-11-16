@@ -9,14 +9,28 @@ from types import SimpleNamespace
 import sys
 import tempfile
 import unittest
+import resource
 import numpy as np
 import pandas as pd
 from analyze import analyze_trees, classify_frames, concentration, parse_perf, query_weights, run_trees
 
 BUILD = Path(sys.argv.pop(1)).resolve() if len(sys.argv)>1 else None
+CAPTURE_BUILD = Path(sys.argv.pop(1)).resolve() if len(sys.argv)>1 else None
 
 
 class Statistics(unittest.TestCase):
+    @unittest.skipUnless(BUILD, 'Pass an analysis build directory')
+    def test_capture_rejects_analysis_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            def no_core():
+                resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+            p = subprocess.run([BUILD/'codetree-dataset-fixture', root/'data', root/'expected'],
+                               capture_output=True, text=True, preexec_fn=no_core)
+            self.assertNotEqual(p.returncode, 0)
+            self.assertIn('capture requires CT_ANALYSIS=OFF', p.stderr)
+            self.assertFalse((root/'data').exists())
+
     def test_parallel_scheduler(self):
         barrier = Barrier(2)
         def worker(value):
@@ -34,6 +48,15 @@ class Statistics(unittest.TestCase):
         w = query_weights(q)
         np.testing.assert_allclose(w.query_weight, [90/101,10/101,1/101,1])
         np.testing.assert_allclose(w.problem_weight, [.45,.05,.5,1])
+
+    def test_time_weighting(self):
+        q = pd.DataFrame(dict(algorithm=['otter']*3, problem=['a', 'a', 'b'],
+                             weight=[3, 1, 2], time_weight=[1, 3, 4]))
+        w = query_weights(q, 'baseline-time')
+        np.testing.assert_allclose(w.query_weight, [1/8, 3/8, 4/8])
+        np.testing.assert_allclose(w.problem_weight, [1/8, 3/8, 1/2])
+        with self.assertRaises(RuntimeError):
+            query_weights(q.drop(columns='time_weight'), 'baseline-time')
 
     def test_hotness(self):
         _, _, stats = concentration(np.array([0,100]), np.array([99,1]))
@@ -58,12 +81,12 @@ class Statistics(unittest.TestCase):
         self.assertEqual(classify_frames(samples[0][1]), ['CHECK_FUN','incremental_compatibility'])
         self.assertEqual(classify_frames(samples[1][1]), [])
 
-    @unittest.skipUnless(BUILD, 'Pass the analysis build directory for integration tests')
+    @unittest.skipUnless(BUILD and CAPTURE_BUILD, 'Pass separate analysis and normal capture build directories')
     def test_replay(self):
         subprocess.run([BUILD/'codetree-analysis-test'], check=True)
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
-            subprocess.run([BUILD/'codetree-dataset-fixture', tmp/'dataset',tmp/'expected.csv'], check=True)
+            subprocess.run([CAPTURE_BUILD/'codetree-dataset-fixture', tmp/'dataset',tmp/'expected.csv'], check=True)
             with (tmp/'queries.csv').open('w') as out:
                 subprocess.run([BUILD/'codetree-replay', tmp/'dataset/tree-0', '--all', '--verify',
                                 '--analysis-dir',tmp/'stats'], stdout=out, check=True)

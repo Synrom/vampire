@@ -64,7 +64,9 @@ std::string csv(const std::string& value)
 
 struct Query {
   uint64_t id, mutation, size;
-  unsigned bucket;
+  unsigned bucket = 0;
+  uint64_t cpuNs = 0, multiplicity = 1;
+  double weight = 0, timeWeight = 0;
   bool sres;
   Clause* clause;
 };
@@ -82,7 +84,8 @@ struct Dataset {
   std::vector<Query> queries;
   std::map<unsigned, std::pair<uint64_t, uint64_t>> buckets;
   std::string problem, algorithm;
-  uint64_t population = 0;
+  uint64_t population = 0, totalCpuNs = 0, draws = 0, zeroTimes = 0;
+  unsigned version = 0;
 
   ~Dataset() { for (auto cl : owned) cl->decRefCnt(); }
 
@@ -121,7 +124,8 @@ struct Dataset {
   {
     std::ifstream meta(path / "metadata.txt");
     std::string line, key;
-    require(bool(std::getline(meta, line)) && line == "CTD 1", "Unsupported/missing metadata");
+    require(bool(std::getline(meta, line)) && (line == "CTD 1" || line == "CTD 2"), "Unsupported/missing metadata");
+    auto metadataVersion = line;
     while (std::getline(meta, line)) {
       std::istringstream in(line);
       in >> key;
@@ -130,9 +134,13 @@ struct Dataset {
     }
     require(algorithm == "otter" || algorithm == "discount", "Invalid saturation algorithm");
     std::ifstream sample(path / "sample.ctd", std::ios::binary);
-    unsigned version;
     uint64_t bytes;
-    require(bool(sample >> key >> version >> bytes >> population) && key == "CTD" && version == 1, "Invalid sample header");
+    require(bool(sample >> key >> version >> bytes >> population) && key == "CTD" && (version == 1 || version == 2), "Invalid sample header");
+    require(metadataVersion == "CTD " + std::to_string(version), "Dataset version mismatch");
+    if (version == 2) {
+      require(bool(sample >> totalCpuNs >> draws >> zeroTimes) && draws > 0 && zeroTimes <= population, "Invalid time sample header");
+      require((population == 0) == (totalCpuNs == 0), "Invalid CPU time population");
+    }
     require(bytes <= fs::file_size(path / "history.ctd"), "Truncated history");
     std::ifstream history(path / "history.ctd", std::ios::binary);
     std::unordered_map<uint64_t, Clause*> active;
@@ -231,15 +239,23 @@ struct Dataset {
       std::istringstream in(line);
       char tag;
       in >> tag;
-      if (tag == 'B') {
+      if (tag == 'B' && version == 1) {
         uint64_t seen, count;
         require(bool(in >> currentBucket >> seen >> count), "Invalid bucket header");
         require(currentBucket < 64 && count <= seen && !buckets.count(currentBucket), "Invalid bucket");
         buckets[currentBucket] = {seen, count};
       } else if (tag == 'Q') {
         Query q;
-        require(bool(in >> q.id >> q.mutation >> q.bucket >> q.sres >> q.size), "Invalid query header");
-        require(q.bucket == currentBucket && q.mutation <= mutations.size() && q.id <= population && queryIds.insert(q.id).second, "Invalid query metadata");
+        if (version == 1) {
+          require(bool(in >> q.id >> q.mutation >> q.bucket >> q.sres >> q.size), "Invalid query header");
+          require(q.bucket == currentBucket, "Invalid bucket reference");
+        } else {
+          require(bool(in >> q.id >> q.multiplicity >> q.mutation >> q.sres >> q.size >> q.cpuNs), "Invalid time query header");
+          require(q.cpuNs > 0 && q.cpuNs <= totalCpuNs && q.multiplicity > 0 && q.multiplicity <= draws, "Invalid time sampling weight");
+          q.timeWeight = double(q.multiplicity) * totalCpuNs / draws;
+          q.weight = q.timeWeight / q.cpuNs;
+        }
+        require(q.mutation <= mutations.size() && q.id > 0 && q.id <= population && queryIds.insert(q.id).second, "Invalid query metadata");
         q.clause = clause(in);
         queries.push_back(q);
         ++retained[q.bucket];
@@ -248,10 +264,20 @@ struct Dataset {
       std::string extra;
       require(!(in >> extra), "Extra sample fields");
     }
-    uint64_t seen = 0;
-    require(buckets.size() == 64, "Missing buckets");
-    for (auto [id, b] : buckets) { require(retained[id] == b.second, "Missing retained query"); seen += b.first; }
-    require(seen == population, "Population mismatch");
+    if (version == 1) {
+      uint64_t seen = 0;
+      require(buckets.size() == 64, "Missing buckets");
+      for (auto [id, b] : buckets) { require(retained[id] == b.second, "Missing retained query"); seen += b.first; }
+      require(seen == population, "Population mismatch");
+      for (auto& q : queries) {
+        auto [count, kept] = buckets.at(q.bucket);
+        q.weight = double(count) / kept;
+      }
+    } else {
+      uint64_t count = 0;
+      for (auto& q : queries) count += q.multiplicity;
+      require(count == (population ? draws : 0), "Sample multiplicities do not sum to draw count");
+    }
     std::sort(queries.begin(), queries.end(), [](auto& a, auto& b) { return a.id < b.id; });
   }
 };
@@ -375,14 +401,14 @@ int main(int argc, char** argv)
       require(bool(histogram), "Cannot open histogram output");
       histogram << "query,metric,value,count\n";
     }
-    constexpr const char* csvHeader = "dataset,problem,algorithm,query,bucket,population,retained,weight,index_size,query_literals,sres,mode,repeats,matches,total_ns,dispatches,expanded_ops,max_ils_depth,logical_ops,success_scan_checks\n";
+    constexpr const char* csvHeader = "dataset,problem,algorithm,query,bucket,population,retained,weight,index_size,query_literals,sres,mode,repeats,matches,total_ns,dispatches,expanded_ops,max_ils_depth,logical_ops,success_scan_checks,sampling,multiplicity,baseline_cpu_ns,total_baseline_cpu_ns,draws,time_weight\n";
     if (!fs::exists(fs::path(argv[1]) / "metadata.txt")) {
       std::vector<fs::path> trees;
       for (const auto& entry : fs::recursive_directory_iterator(argv[1])) {
         if (entry.path().filename() != "metadata.txt") continue;
         std::ifstream meta(entry.path());
         std::string line, key, problem, algorithm;
-        if (!std::getline(meta, line) || line != "CTD 1") continue;
+        if (!std::getline(meta, line) || (line != "CTD 1" && line != "CTD 2")) continue;
         while (std::getline(meta, line)) {
           std::istringstream in(line);
           in >> key;
@@ -421,6 +447,7 @@ int main(int argc, char** argv)
     Dataset data;
     auto start = Clock::now();
     data.load(argv[1]);
+    require(data.version == 1 || bucketFilter < 0, "--bucket only applies to legacy CTD1 datasets; time sampling has no buckets");
     require(data.problem.find(problemFilter) != std::string::npos &&
             (algorithmFilter.empty() || data.algorithm == algorithmFilter), "Dataset does not match the problem/algorithm filters");
     auto seconds = [](auto duration) { return std::chrono::duration<double>(duration).count(); };
@@ -465,9 +492,10 @@ int main(int argc, char** argv)
       }
       if (profile) perfEnabled(false);
       auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
-      auto [seen, kept] = data.buckets.at(q.bucket);
-      std::cout << csv(argv[1]) << ',' << csv(data.problem) << ',' << data.algorithm << ',' << q.id << ',' << q.bucket << ','
-                << seen << ',' << kept << ',' << std::setprecision(12) << double(seen) / kept << ','
+      auto [seen, kept] = data.version == 1 ? data.buckets.at(q.bucket)
+        : std::make_pair(data.population, uint64_t(data.queries.size()));
+      std::cout << csv(argv[1]) << ',' << csv(data.problem) << ',' << data.algorithm << ',' << q.id << ',' << (data.version == 1 ? int(q.bucket) : -1) << ','
+                << seen << ',' << kept << ',' << std::setprecision(12) << q.weight << ','
                 << q.size << ',' << q.clause->length() << ',' << q.sres << ',' << (all ? "all" : "first")
                 << ',' << repeat << ',' << matches << ',' << ns;
 #ifdef CT_ANALYSIS
@@ -480,7 +508,9 @@ int main(int argc, char** argv)
       } else
 #endif
       { std::cout << ",,,,,"; }
-      std::cout << '\n' << std::flush;
+      std::cout << ',' << (data.version == 1 ? "stratified" : "time_pps") << ',' << q.multiplicity
+                << ',' << q.cpuNs << ',' << data.totalCpuNs << ',' << data.draws << ',' << q.timeWeight
+                << '\n' << std::flush;
       ++executed;
     }
     require(executed > 0, "No queries selected");

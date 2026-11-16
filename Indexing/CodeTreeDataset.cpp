@@ -1,5 +1,6 @@
 /* See https://vprover.github.io/license.html for the Vampire licence. */
 #include "CodeTreeDataset.hpp"
+#include "CodeTreeTimeSampler.hpp"
 #include "Kernel/Clause.hpp"
 #include "Kernel/OperatorType.hpp"
 #include "Kernel/Signature.hpp"
@@ -7,7 +8,8 @@
 #include "Shell/Options.hpp"
 #include "Shell/Statistics.hpp"
 
-#include <array>
+#include <map>
+#include <time.h>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -38,24 +40,23 @@ unsigned setting(const char* name, unsigned fallback)
 }
 
 struct CodeTreeDataset::Impl {
-  struct Bucket {
-    uint64_t seen = 0;
-    std::vector<std::string> queries;
-  };
+  struct Sample { uint64_t id; std::string record; };
   fs::path dir;
   std::ofstream journal;
   std::unordered_map<Term*, uint64_t> terms;
   std::unordered_map<Clause*, uint64_t> active;
-  std::array<Bucket, 64> buckets;
+  std::vector<std::shared_ptr<Sample>> slots;
   unsigned types = 0, functions = 0, predicates = 1;
   unsigned capacity, seed;
   uint64_t mutations = 0, queries = 0, nextClause = 0;
-  std::mt19937_64 rng;
+  CodeTreeTimeSampler sampler;
+  uint64_t zeroTimes = 0;
 
   explicit Impl(fs::path path)
-    : dir(std::move(path)), capacity(setting("VAMPIRE_CT_SAMPLES_PER_BUCKET", 4)),
-      seed(setting("VAMPIRE_CT_SEED", 1)), rng(seed)
+    : dir(std::move(path)), capacity(setting("VAMPIRE_CT_SAMPLES", 256)),
+      seed(setting("VAMPIRE_CT_SEED", 1)), sampler(capacity, seed)
   {
+    slots.resize(capacity);
     if (!fs::create_directory(dir)) throw std::runtime_error("Dataset already exists: " + dir.string());
     journal.exceptions(std::ios::badbit | std::ios::failbit);
     journal.open(dir / "history.ctd", std::ios::binary);
@@ -65,12 +66,19 @@ struct CodeTreeDataset::Impl {
     if (sa != Shell::Options::SaturationAlgorithm::OTTER &&
         sa != Shell::Options::SaturationAlgorithm::DISCOUNT)
       throw std::runtime_error("Code tree recording requires -sa otter or -sa discount");
-    if (env.higherOrder()) throw std::runtime_error("Code tree dataset v1 supports first-order clauses only");
-    meta << "CTD 1\nproblem " << std::quoted(env.options->inputFile())
+    if (env.higherOrder()) throw std::runtime_error("Code tree dataset v2 supports first-order clauses only");
+    meta << "CTD 2\nproblem " << std::quoted(env.options->inputFile())
          << "\nalgorithm " << (sa == Shell::Options::SaturationAlgorithm::OTTER ? "otter" : "discount")
          << "\nversion " << std::quoted(std::string(VERSION_STRING))
          << "\nstrategy " << std::quoted(env.options->generateEncodedOptions())
          << "\nseed " << seed << "\ncapacity " << capacity << '\n';
+    timespec resolution;
+    if (clock_getres(CLOCK_THREAD_CPUTIME_ID, &resolution))
+      throw std::runtime_error("Thread CPU clock unavailable");
+    meta << "sampling time_pps_with_replacement\nclock thread_cpu\n"
+         << "clock_resolution_ns " << resolution.tv_sec * 1000000000ULL + resolution.tv_nsec
+         << "\ntime_floor_ns 1\nmeasurement matcher_init_next_reset\n"
+         << "capture_implementation normal\n";
     // FNV-1a is an identity aid, not a cryptographic checksum.
     std::ifstream input(env.options->inputFile(), std::ios::binary);
     bool inputAvailable = bool(input);
@@ -113,7 +121,7 @@ struct CodeTreeDataset::Impl {
 
   void signature()
   {
-    if (env.higherOrder()) throw std::runtime_error("Code tree dataset v1 supports first-order clauses only");
+    if (env.higherOrder()) throw std::runtime_error("Code tree dataset v2 supports first-order clauses only");
     // Preserve symbol numbers, not just names: CHECK_FUN search structures use them.
     while (types < env.signature->typeCons()) {
       auto s = env.signature->getTypeCon(types);
@@ -152,12 +160,16 @@ struct CodeTreeDataset::Impl {
     out.exceptions(std::ios::badbit | std::ios::failbit);
     // Only this durable prefix is needed by the sample. Later records may be
     // incomplete after _Exit from Vampire's timer thread.
-    out << "CTD 1 " << journal.tellp() << ' ' << queries << '\n';
-    for (unsigned i = 0; i < buckets.size(); ++i) {
-      const auto& b = buckets[i];
-      out << "B " << i << ' ' << b.seen << ' ' << b.queries.size() << '\n';
-      for (const auto& q : b.queries) out << q << '\n';
+    out << "CTD 2 " << journal.tellp() << ' ' << queries << ' '
+        << sampler.total() << ' ' << capacity << ' ' << zeroTimes << '\n';
+    std::map<uint64_t, std::pair<std::shared_ptr<Sample>, unsigned>> retained;
+    for (auto& slot : slots) if (slot) {
+      auto& entry = retained[slot->id];
+      entry.first = slot;
+      ++entry.second;
     }
+    for (auto& [id, entry] : retained)
+      out << "Q " << id << ' ' << entry.second << ' ' << entry.first->record << '\n';
     out.close();
     fs::rename(dir / "sample.tmp", dir / "sample.ctd");
   }
@@ -167,6 +179,12 @@ std::unique_ptr<CodeTreeDataset> CodeTreeDataset::create()
 {
   const char* output = std::getenv("VAMPIRE_CT_DATASET");
   if (!output || !*output) return nullptr;
+#if defined(CT_ANALYSIS) || defined(CT_PROFILE) || VTIME_PROFILING
+  std::cerr << "Dataset capture requires CT_ANALYSIS=OFF, CT_PROFILE=OFF and TIME_PROFILING=OFF\n";
+  throw std::runtime_error("Dataset capture requires CT_ANALYSIS=OFF, CT_PROFILE=OFF and TIME_PROFILING=OFF");
+#endif
+  if (std::getenv("VAMPIRE_CT_SAMPLES_PER_BUCKET"))
+    throw std::runtime_error("Bucket sampling was replaced: use VAMPIRE_CT_SAMPLES for the total draw count");
   static unsigned nextTree = 0;
   // Each process must use its own destination (single-strategy runs).
   static fs::path root = [&]() {
@@ -211,23 +229,27 @@ void CodeTreeDataset::remove(Clause* cl)
   d.journal << "R " << ++d.mutations << ' ' << id << '\n';
 }
 
-void CodeTreeDataset::query(Clause* cl, bool sres)
+uint64_t CodeTreeDataset::cpuTimeNs()
+{
+  timespec now;
+  if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now))
+    throw std::runtime_error("Cannot read thread CPU clock");
+  return uint64_t(now.tv_sec) * 1000000000ULL + now.tv_nsec;
+}
+
+void CodeTreeDataset::query(Clause* cl, bool sres, uint64_t cpuNs)
 {
   auto& d = *_impl;
   ++d.queries;
-  unsigned size = d.active.size() < 32 ? 0 : d.active.size() < 256 ? 1 : d.active.size() < 2048 ? 2 : 3;
-  unsigned length = cl->length() <= 1 ? 0 : cl->length() == 2 ? 1 : cl->length() <= 4 ? 2 : 3;
-  unsigned phase = d.queries <= 256 ? 0 : d.queries <= 4096 ? 1 : d.queries <= 65536 ? 2 : 3;
-  unsigned bucket = (phase * 4 + size) * 4 + length;
-  auto& b = d.buckets[bucket];
-  ++b.seen;
-  uint64_t slot = b.queries.size() < d.capacity ? b.queries.size() : std::uniform_int_distribution<uint64_t>(0, b.seen - 1)(d.rng);
-  if (slot < d.capacity) {
+  // Give clock-quantized zero durations positive support; expose their count.
+  if (!cpuNs) { ++d.zeroTimes; cpuNs = 1; }
+  auto replacements = d.sampler.offer(cpuNs);
+  if (!replacements.empty()) {
     std::ostringstream out;
-    out << "Q " << d.queries << ' ' << d.mutations << ' ' << bucket << ' ' << sres << ' '
-        << d.active.size() << ' ' << d.clause(cl);
-    if (slot == b.queries.size()) b.queries.push_back(out.str());
-    else b.queries[slot] = out.str();
+    out << d.mutations << ' ' << sres << ' ' << d.active.size() << ' '
+        << cpuNs << ' ' << d.clause(cl);
+    auto saved = std::make_shared<Impl::Sample>(Impl::Sample{d.queries, out.str()});
+    for (auto slot : replacements) d.slots[slot] = saved;
     d.checkpoint();
   } else if (d.queries % 1024 == 0) {
     d.checkpoint();

@@ -2,6 +2,7 @@
 // Integration-test producer: expected results are a separate test oracle file,
 // never part of the captured dataset.
 #include "Indexing/ClauseCodeTree.hpp"
+#include "Indexing/CodeTreeDataset.hpp"
 #include "Kernel/Clause.hpp"
 #include "Kernel/OperatorType.hpp"
 #include "Kernel/Signature.hpp"
@@ -65,11 +66,13 @@ int main(int argc, char** argv)
       if (i % 100 == 50) { tree.remove(c2); tree.insert(c2); }
       auto query = queries[i % queries.size()];
       ClauseCodeTree::ClauseMatcher matcher;
-      matcher.init(&tree, query, i % 2 == 0);
+      CodeTreeDataset::QueryTimer timer(tree.recordingQueries());
+      timer.measure([&] { matcher.init(&tree, query, i % 2 == 0); });
       int resolved;
       unsigned matches = 0;
-      while (matcher.next(resolved)) ++matches;
-      matcher.reset();
+      while (timer.measure([&] { return matcher.next(resolved); })) ++matches;
+      timer.measure([&] { matcher.reset(); });
+      tree.recordQuery(query, i % 2 == 0, timer.elapsed());
       expected << i << ',' << matches << '\n';
       if (i % 100 == 0) tree.insert(c1);
     }

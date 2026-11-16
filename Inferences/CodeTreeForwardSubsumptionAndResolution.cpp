@@ -21,6 +21,7 @@
 
 #include "ProofExtra.hpp"
 #include "CodeTreeForwardSubsumptionAndResolution.hpp"
+#include "Indexing/CodeTreeDataset.hpp"
 
 namespace Inferences {
 
@@ -49,17 +50,22 @@ bool CodeTreeForwardSubsumptionAndResolution::perform(Clause *cl, Clause *&repla
 
   static typename ClauseCodeTree::ClauseMatcher cm;
 
-  cm.init(_ct, cl, _subsumptionResolution);
+  Indexing::CodeTreeDataset::QueryTimer timer(_ct->recordingQueries());
+  timer.measure([&] { cm.init(_ct, cl, _subsumptionResolution); });
+  auto finishQuery = [&] {
+    timer.measure([&] { cm.reset(); });
+    _ct->recordQuery(cl, _subsumptionResolution, timer.elapsed());
+  };
 
   Clause* premise;
   int resolvedQueryLit;
 
-  while ((premise = cm.next(resolvedQueryLit))) {
+  while ((premise = timer.measure([&] { return cm.next(resolvedQueryLit); }))) {
     if (resolvedQueryLit == -1) {
       ASS(satSubs.checkSubsumption(premise, cl));
       premises = pvi(getSingletonIterator(premise));
       env.statistics->forwardSubsumed++;
-      cm.reset();
+      finishQuery();
       return true;
     }
     if (rsi && Random::getDouble(0.0,1.0) < RSI_SKIP_PROB) {
@@ -78,11 +84,11 @@ bool CodeTreeForwardSubsumptionAndResolution::perform(Clause *cl, Clause *&repla
     if(env.options->proofExtra() == Options::ProofExtra::FULL)
       env.proofExtra.insert(replacement, new LiteralInferenceExtra((*cl)[resolvedQueryLit]));
     premises = pvi(getSingletonIterator(premise));
-    cm.reset();
+    finishQuery();
     return true;
   }
 
-  cm.reset();
+  finishQuery();
   return false;
 }
 
