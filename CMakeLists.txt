@@ -241,6 +241,18 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
   endif()
 endif()
 
+option(CT_ANALYSIS "Enable replay-only code tree counters" OFF)
+option(CT_PROFILE "Expose code tree instruction bodies to perf" OFF)
+if(CT_ANALYSIS AND CT_PROFILE)
+  message(FATAL_ERROR "Use separate analysis and profiling builds")
+endif()
+foreach(mode CT_ANALYSIS CT_PROFILE)
+  if(${mode})
+    set_property(SOURCE Indexing/CodeTree.cpp Indexing/ClauseCodeTree.cpp
+      tools/codetree/replay.cpp APPEND PROPERTY COMPILE_DEFINITIONS ${mode})
+  endif()
+endforeach()
+
 # wrap up common object files so not built multiple times for each target
 add_library(common OBJECT ${SOURCES})
 
@@ -250,6 +262,10 @@ add_executable(vampire vampire.cpp $<TARGET_OBJECTS:common>)
 add_executable(codetree-replay tools/codetree/replay.cpp $<TARGET_OBJECTS:common>)
 add_executable(codetree-dataset-fixture EXCLUDE_FROM_ALL
   tools/codetree/fixture.cpp $<TARGET_OBJECTS:common>)
+
+add_executable(codetree-analysis-test EXCLUDE_FROM_ALL
+  tools/codetree/test_analysis.cpp $<TARGET_OBJECTS:common>)
+target_compile_definitions(codetree-analysis-test PRIVATE CT_ANALYSIS)
 
 install(TARGETS vampire)
 

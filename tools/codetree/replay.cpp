@@ -1,5 +1,9 @@
 /* See https://vprover.github.io/license.html for the Vampire licence. */
 #include "Indexing/ClauseCodeTree.hpp"
+#include "Indexing/CodeTreeAnalysis.hpp"
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include "Kernel/Clause.hpp"
 #include "Kernel/OperatorType.hpp"
 #include "Kernel/Signature.hpp"
@@ -29,6 +33,16 @@ namespace fs = std::filesystem;
 using Clock = std::chrono::steady_clock;
 
 namespace {
+void perfEnabled(bool enabled)
+{
+#ifdef __linux__
+  if (prctl(enabled ? PR_TASK_PERF_EVENTS_ENABLE : PR_TASK_PERF_EVENTS_DISABLE) != 0)
+    throw std::runtime_error("Cannot toggle perf events");
+#else
+  throw std::runtime_error("Profiling requires Linux");
+#endif
+}
+
 void require(bool ok, const std::string& message)
 { if (!ok) throw std::runtime_error(message); }
 
@@ -288,9 +302,19 @@ void verify(ClauseCodeTree& tree, const Query& q, const std::map<uint64_t, Claus
 int main(int argc, char** argv)
 {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--capabilities") {
+#ifdef CT_ANALYSIS
+      std::cout << "analysis\n";
+#endif
+#ifdef CT_PROFILE
+      std::cout << "profile\n";
+#endif
+      return 0;
+    }
     if (argc < 2 || std::string(argv[1]) == "--help") {
       std::cout << "Usage: codetree-replay DATASET [--repeat N] [--all] [--verify] [--query ID] [--bucket ID]\n"
                    "                       [--problem SUBSTRING] [--algorithm otter|discount]\n"
+                   "                       [--analysis-dir DIR] [--profile]\n"
                    "DATASET can be a tree directory or a collection of captured runs.\n"
                    "CSV goes to stdout; setup and validation summaries go to stderr.\n";
       return argc < 2 ? 1 : 0;
@@ -300,11 +324,27 @@ int main(int argc, char** argv)
     env.options->set("random_traversals", "off");
     uint64_t repeat = 1, queryFilter = 0;
     int bucketFilter = -1;
-    bool all = false, check = false, header = true;
+    bool all = false, check = false, header = true, profile = false;
+    std::string analysisDir;
     std::string problemFilter, algorithmFilter;
     for (int i = 2; i < argc; ++i) {
       std::string option(argv[i]);
-      if (option == "--all") all = true;
+      if (option == "--analysis-dir") {
+#ifdef CT_ANALYSIS
+        require(i + 1 < argc, "Missing analysis directory");
+        analysisDir = argv[++i];
+#else
+        throw std::runtime_error("Rebuild with -DCT_ANALYSIS=ON");
+#endif
+      }
+      else if (option == "--profile") {
+#ifdef CT_PROFILE
+        profile = true;
+#else
+        throw std::runtime_error("Rebuild with -DCT_PROFILE=ON");
+#endif
+      }
+      else if (option == "--all") all = true;
       else if (option == "--verify") check = true;
       else if (option == "--no-header") header = false;
       else if (option == "--problem" || option == "--algorithm") {
@@ -324,7 +364,18 @@ int main(int argc, char** argv)
         else throw std::runtime_error("Unknown option: " + option);
       }
     }
-    constexpr const char* csvHeader = "dataset,problem,algorithm,query,bucket,population,retained,weight,index_size,query_literals,sres,mode,repeats,matches,total_ns\n";
+    require(analysisDir.empty() || (repeat == 1 && !profile), "Analysis requires repeat=1 and no profiling");
+    require(analysisDir.empty() || fs::exists(fs::path(argv[1]) / "metadata.txt"),
+            "--analysis-dir requires a single tree; use analyze.py for collections");
+    if (profile) perfEnabled(false);
+    std::ofstream histogram;
+    if (!analysisDir.empty()) {
+      fs::create_directories(analysisDir);
+      histogram.open(fs::path(analysisDir) / "histograms.csv");
+      require(bool(histogram), "Cannot open histogram output");
+      histogram << "query,metric,value,count\n";
+    }
+    constexpr const char* csvHeader = "dataset,problem,algorithm,query,bucket,population,retained,weight,index_size,query_literals,sres,mode,repeats,matches,total_ns,dispatches,expanded_ops,max_ils_depth,logical_ops,success_scan_checks\n";
     if (!fs::exists(fs::path(argv[1]) / "metadata.txt")) {
       std::vector<fs::path> trees;
       for (const auto& entry : fs::recursive_directory_iterator(argv[1])) {
@@ -395,21 +446,41 @@ int main(int argc, char** argv)
         verify(tree, q, active);
         verification += seconds(Clock::now() - start);
       }
+#ifdef CT_ANALYSIS
+      std::unique_ptr<CodeTreeAnalysis> analysis;
+      if (!analysisDir.empty()) {
+        analysis = std::make_unique<CodeTreeAnalysis>(tree);
+        CodeTreeAnalysis::current = analysis.get();
+      }
+#endif
       uint64_t matches = 0;
       ClauseCodeTree::ClauseMatcher matcher;
       start = Clock::now();
+      if (profile) perfEnabled(true);
       for (uint64_t iteration = 0; iteration < repeat; ++iteration) {
         matcher.init(&tree, q.clause, q.sres);
         int resolved;
         while (matcher.next(resolved)) { ++matches; if (!all) break; }
         matcher.reset();
       }
+      if (profile) perfEnabled(false);
       auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count();
       auto [seen, kept] = data.buckets.at(q.bucket);
       std::cout << csv(argv[1]) << ',' << csv(data.problem) << ',' << data.algorithm << ',' << q.id << ',' << q.bucket << ','
                 << seen << ',' << kept << ',' << std::setprecision(12) << double(seen) / kept << ','
                 << q.size << ',' << q.clause->length() << ',' << q.sres << ',' << (all ? "all" : "first")
-                << ',' << repeat << ',' << matches << ',' << ns << '\n';
+                << ',' << repeat << ',' << matches << ',' << ns;
+#ifdef CT_ANALYSIS
+      CodeTreeAnalysis::current = nullptr;
+      if (analysis) {
+        analysis->write(histogram, q.id);
+        require(bool(histogram), "Cannot write histogram output");
+        std::cout << ',' << analysis->dispatches << ',' << analysis->expanded << ','
+                  << analysis->maxDepth << ',' << analysis->nodes.size() << ',' << analysis->successScanChecks;
+      } else
+#endif
+      { std::cout << ",,,,,"; }
+      std::cout << '\n' << std::flush;
       ++executed;
     }
     require(executed > 0, "No queries selected");

@@ -26,6 +26,7 @@
 #include "Kernel/Term.hpp"
 
 #include "ClauseCodeTree.hpp"
+#include "CodeTreeAnalysis.hpp"
 #include "CodeTreeDataset.hpp"
 
 #undef RSTAT_COLLECTION
@@ -383,6 +384,9 @@ void ClauseCodeTree::LiteralMatcher::init(const CodeTree& tree_, CodeOp* entry_,
     fresh=false;
     CodeOp* sop=entry;
     while(sop) {
+#ifdef CT_ANALYSIS
+      if (CodeTreeAnalysis::current) ++CodeTreeAnalysis::current->successScanChecks;
+#endif
       if(sop->isSuccess()) {
         eagerResults.push(sop);
       }
@@ -652,7 +656,7 @@ Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
   }
 }
 
-inline bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
+CT_PROFILE_INLINE bool ClauseCodeTree::ClauseMatcher::canEnterLiteral(CodeOp* op)
 {
   ASS(op->isLitEnd());
   ASS_EQ(lms.top()->op, op);
@@ -760,7 +764,7 @@ void ClauseCodeTree::ClauseMatcher::leaveLiteral()
 
 //////////////// Multi-literal matching
 
-bool ClauseCodeTree::ClauseMatcher::checkCandidate(Clause* cl, int& resolvedQueryLit)
+CT_PROFILE_NOINLINE bool ClauseCodeTree::ClauseMatcher::checkCandidate(Clause* cl, int& resolvedQueryLit)
 {
   unsigned clen=cl->length();
   //the last matcher in mls is the one that yielded the SUCCESS operation

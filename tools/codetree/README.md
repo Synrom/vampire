@@ -169,3 +169,11 @@ agreement, insertion/removal history, typed terms, equality orientation,
 polymorphic predicates, both subsumption-resolution settings, deterministic
 sampling, sample bounds, query filtering/repetition, and interrupted/truncated
 history handling. Test-only expected results are outside the dataset.
+
+## Exploratory analysis
+
+[`analyze.py`](analyze.py) turns a dataset root into weighted distribution plots,
+exact histogram CSVs, per-problem and Otter/Discount comparisons, and a separate
+Linux perf pass. See [ANALYSIS.md](ANALYSIS.md) for the one-command workflow,
+metric definitions (including SEARCH_STRUCT expansion), outputs, and profiling
+limitations.

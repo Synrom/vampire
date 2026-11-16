@@ -25,6 +25,7 @@
 #include "Kernel/TermIterators.hpp"
 
 #include "CodeTree.hpp"
+#include "CodeTreeAnalysis.hpp"
 
 #define ISATTY 1
 #if ISATTY
@@ -552,6 +553,11 @@ bool CodeTree::Matcher<removing, checkRange>::execute()
         btStack.push(BTPoint(tp, op->alternative()));
       }
     }
+#ifdef CT_ANALYSIS
+    if constexpr (!removing) {
+      if (CodeTreeAnalysis::current) CodeTreeAnalysis::current->hit(op);
+    }
+#endif
     switch(op->_instruction()) {
       case SUCCESS_OR_FAIL:
         if(op->isFail()) {
@@ -688,7 +694,7 @@ bool CodeTree::Matcher<removing, checkRange>::prepareLiteral()
 }
 
 template<bool removing, bool checkRange>
-inline bool CodeTree::Matcher<removing, checkRange>::doAssignVar()
+CT_PROFILE_INLINE bool CodeTree::Matcher<removing, checkRange>::doAssignVar()
 {
   ASS_EQ(op->_instruction(), ASSIGN_VAR);
 
@@ -729,7 +735,7 @@ inline bool CodeTree::Matcher<removing, checkRange>::doAssignVar()
 }
 
 template<bool removing, bool checkRange>
-inline bool CodeTree::Matcher<removing, checkRange>::doCheckVar()
+CT_PROFILE_INLINE bool CodeTree::Matcher<removing, checkRange>::doCheckVar()
 {
   ASS_EQ(op->_instruction(), CHECK_VAR);
 
@@ -761,7 +767,7 @@ inline bool CodeTree::Matcher<removing, checkRange>::doCheckVar()
 }
 
 template<bool removing, bool checkRange>
-inline bool CodeTree::Matcher<removing, checkRange>::doCheckFun()
+CT_PROFILE_INLINE bool CodeTree::Matcher<removing, checkRange>::doCheckFun()
 {
   ASS_EQ(op->_instruction(), CHECK_FUN);
 
@@ -800,7 +806,7 @@ inline bool CodeTree::Matcher<removing, checkRange>::doCheckGroundTerm()
 }
 
 template<bool removing, bool checkRange>
-inline bool CodeTree::Matcher<removing, checkRange>::doSearchStruct()
+CT_PROFILE_INLINE bool CodeTree::Matcher<removing, checkRange>::doSearchStruct()
 {
   ASS_EQ(op->_instruction(), SEARCH_STRUCT);
 
