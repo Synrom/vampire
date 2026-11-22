@@ -280,6 +280,14 @@ public:
     SearchStruct(Kind kind, size_t length);
   };
 
+  struct FunctorTags
+  {
+    static constexpr size_t capacity = 64;
+    // Same order as values. Padding allows full-width loads at every length.
+    uint8_t bytes[capacity]{};
+  };
+  struct NoFunctorTags {};
+
   template<SearchStruct::Kind k>
   struct SearchStructImpl
   : public SearchStruct
@@ -297,6 +305,7 @@ public:
     template<bool doInsert> CodeOp*& targetOp(const T& val);
 
     std::vector<T> values;
+    [[no_unique_address]] std::conditional_t<k == SearchStruct::FN_STRUCT, FunctorTags, NoFunctorTags> tags;
   };
 
   using FnSearchStruct = SearchStructImpl<SearchStruct::FN_STRUCT>;

@@ -12,7 +12,16 @@
  * Implements class CodeTree.
  */
 
+#include <algorithm>
 #include <utility>
+
+#if defined(__ARM_NEON) && defined(__aarch64__) && !defined(__AARCH64EB__)
+#include <arm_neon.h>
+#define CODETREE_NEON 1
+#elif defined(__AVX2__) || (defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__)))
+#include <immintrin.h>
+#define CODETREE_AVX2 1
+#endif
 
 #include "Debug/RuntimeStatistics.hpp"
 
@@ -459,14 +468,114 @@ void CodeTree::SearchStruct::destroy()
   }
 }
 
+namespace {
+
+#if CODETREE_NEON
+inline uint64_t matchingTags(const uint8_t* tags, unsigned value)
+{
+  const auto needle = vdupq_n_u8(static_cast<uint8_t>(value));
+  const uint8x16_t bits = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+  auto lanes = [&](unsigned offset) {
+    return vandq_u8(vceqq_u8(vld1q_u8(tags + offset), needle), bits);
+  };
+  // Each group of eight lanes has disjoint bits. Pairwise sums pack the
+  // four comparisons into eight consecutive bytes, one bit per functor.
+  auto pairs = vpaddq_u8(lanes(0), lanes(16));
+  auto morePairs = vpaddq_u8(lanes(32), lanes(48));
+  auto quads = vpaddq_u8(pairs, morePairs);
+  auto octets = vpadd_u8(vget_low_u8(quads), vget_high_u8(quads));
+  return vget_lane_u64(vreinterpret_u64_u8(octets), 0);
+}
+#elif CODETREE_AVX2
+#if !defined(__AVX2__)
+__attribute__((target("avx2")))
+#endif
+inline uint64_t matchingTags(const uint8_t* tags, unsigned value)
+{
+  const auto needle = _mm256_set1_epi8(static_cast<char>(value));
+  const auto lo = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(tags));
+  const auto hi = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(tags + 32));
+  uint32_t low = _mm256_movemask_epi8(_mm256_cmpeq_epi8(lo, needle));
+  uint32_t high = _mm256_movemask_epi8(_mm256_cmpeq_epi8(hi, needle));
+  return low | (uint64_t(high) << 32);
+}
+#endif
+
+#if CODETREE_NEON
+// The first and last four values cover every slot at lengths 4..8.
+inline size_t matchUpToEight(const unsigned* values, size_t length, unsigned value)
+{
+  auto needle = vdupq_n_u32(value);
+  auto first = vceqq_u32(vld1q_u32(values), needle);
+  auto last = vceqq_u32(vld1q_u32(values + length - 4), needle);
+  auto halves = vcombine_u16(vmovn_u32(first), vmovn_u32(last));
+  uint64_t mask = vget_lane_u64(vreinterpret_u64_u8(vmovn_u16(halves)), 0);
+  size_t lane = std::countr_zero(mask) / 8;
+  // A zero mask gives lane 8, hence the miss sentinel length.
+  return lane < 4 ? lane : length - (8 - lane);
+}
+#endif
+
+#if CODETREE_NEON || CODETREE_AVX2
+inline bool simdTagsAvailable()
+{
+#if CODETREE_AVX2 && !defined(__AVX2__)
+  return __builtin_cpu_supports("avx2");
+#else
+  return true;
+#endif
+}
+
+size_t findSmallFunctor(const CodeTree::FnSearchStruct& table, size_t length, unsigned value)
+{
+#if CODETREE_NEON
+  if (length >= 4 && length <= 8) {
+    return matchUpToEight(table.values.data(), length, value);
+  }
+#endif
+  // Nonempty by construction. Exclude padding before indexing values.
+  uint64_t mask = matchingTags(table.tags.bytes, value) & (UINT64_MAX >> (64 - length));
+  while (mask) {
+    auto i = std::countr_zero(mask);
+    if (table.values[i] == value) {
+      return i;
+    }
+    mask &= mask - 1;
+  }
+  return length;
+}
+#endif
+
+template<bool doInsert>
+CodeTree::CodeOp** findFunctorSlot(CodeTree::FnSearchStruct& table, unsigned value)
+{
+#if CODETREE_NEON || CODETREE_AVX2
+  size_t length = table.length();
+  if (length <= CodeTree::FunctorTags::capacity && simdTagsAvailable()) {
+    size_t i = findSmallFunctor(table, length, value);
+    if (i < length) {
+      return &table.targets[i];
+    }
+    if constexpr (!doInsert) {
+      return nullptr;
+    }
+  }
+#endif
+  // New keys need their sorted insertion position. On a read-only binary
+  // lookup a neighbouring CHECK_FUN can be returned and will reject a miss.
+  return &table.targetOp<doInsert>(value);
+}
+
+} // namespace
+
 template<bool doInsert>
 bool CodeTree::SearchStruct::getTargetOpPtr(const CodeOp& insertedOp, CodeOp**& tgt)
 {
   switch(kind) {
   case FN_STRUCT:
     if(!insertedOp.isCheckFun()) { return false; }
-    tgt=&static_cast<FnSearchStruct*>(this)->targetOp<doInsert>(insertedOp._arg());
-    return true;
+    tgt = findFunctorSlot<doInsert>(*static_cast<FnSearchStruct*>(this), insertedOp._arg());
+    return tgt != nullptr;
   case GROUND_TERM_STRUCT:
     if(!insertedOp.isCheckGroundTerm()) { return false; }
     tgt=&static_cast<GroundTermSearchStruct*>(this)->targetOp<doInsert>(insertedOp.getTargetTerm());
@@ -483,8 +592,10 @@ CodeTree::CodeOp* CodeTree::SearchStruct::getTargetOp(const FlatTerm::Entry* ftP
 {
   if(!ftPos->isFun()) { return 0; }
   switch(kind) {
-  case FN_STRUCT:
-    return static_cast<FnSearchStruct*>(this)->targetOp<false>(ftPos->_number());
+  case FN_STRUCT: {
+    CodeOp** slot = findFunctorSlot<false>(*static_cast<FnSearchStruct*>(this), ftPos->_number());
+    return slot ? *slot : nullptr;
+  }
   case GROUND_TERM_STRUCT:
     ftPos++;
     ASS_EQ(ftPos->_tag(), FlatTerm::FUN_TERM_PTR);
@@ -534,6 +645,13 @@ CodeTree::CodeOp*& CodeTree::SearchStructImpl<k>::targetOp(const T& val)
   }
   targets.insert(targets.begin()+left,0);
   values.insert(values.begin()+left,val);
+  if constexpr (k == SearchStruct::FN_STRUCT) {
+    if (length() <= FunctorTags::capacity) {
+      auto* bytes = tags.bytes;
+      std::move_backward(bytes + left, bytes + length() - 1, bytes + length());
+      bytes[left] = static_cast<uint8_t>(val);
+    }
+  }
   return targets[left];
 }
 
@@ -1290,7 +1408,11 @@ void CodeTree::compressCheckOps(CodeOp* chainStart)
   for(size_t i=0;i<slen;i++) {
     if constexpr (k==SearchStruct::FN_STRUCT) {
       ASS(chfOps[i]->isCheckFun());
-      res->values.push_back(chfOps[i]->_arg());
+      unsigned value = chfOps[i]->_arg();
+      res->values.push_back(value);
+      if (slen <= FunctorTags::capacity) {
+        res->tags.bytes[i] = static_cast<uint8_t>(value);
+      }
     } else {
       ASS(chfOps[i]->isCheckGroundTerm());
       res->values.push_back(chfOps[i]->getTargetTerm());

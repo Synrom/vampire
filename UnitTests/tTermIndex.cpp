@@ -151,6 +151,44 @@ TEST_FUN(custom_data_01) {
 }
 
 
+TEST_FUN(check_fun_tag_collisions_and_growth) {
+  using Data = MyData<Literal*>;
+  CodeTreeLIS<Data> tree;
+  std::vector<Literal*> literals;
+  for (unsigned i = 0; i <= 256; ++i) {
+    auto pred = env.signature->addFreshPredicate(OperatorType::getPredicateType({}), "tag");
+    literals.push_back(Literal::create(pred->number(), false, {}));
+  }
+
+  // Literal headers 128 predicate numbers apart have identical low bytes.
+  // Alternate between the two ranges so sorted insertion shifts existing tags.
+  auto key = [&](unsigned i) { return literals[i / 2 + (i % 2) * 128]; };
+  auto check = [&](Literal* literal, bool present) {
+    auto it = tree.getGeneralizations(literal, false);
+    ASS_EQ(it.hasNext(), present);
+    if (present) {
+      auto* found = it.next().data;
+      ASS_EQ(found->key(), literal);
+      ASS(!it.hasNext());
+    }
+  };
+
+  for (unsigned i = 0; i < 68; ++i) {
+    tree.handle(Data(key(i), ""), true);
+    for (unsigned j = 0; j <= i; ++j) {
+      check(key(j), true);
+    }
+    check(key(i + 1), false);
+    check(literals.back(), false);
+    if (i == 32 || i == 64) {
+      tree.handle(Data(key(1), ""), false);
+      check(key(1), false);
+      tree.handle(Data(key(1), ""), true);
+      check(key(1), true);
+    }
+  }
+}
+
 TEST_FUN(custom_data_literal_01) {
 
   DECL_DEFAULT_VARS
