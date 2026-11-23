@@ -43,6 +43,7 @@ public:
   struct ILStruct;
   struct SearchStruct;
   struct CodeOp;
+  struct CodeTreeSubtree;
 
 protected:
   /**
@@ -117,7 +118,8 @@ public:
     struct GVArrComparator;
 
     unsigned depth;
-    ILStruct* previous;
+    // A null continuation denotes a single SUCCESS immediately after the LIT_END.
+    CodeTreeSubtree* next = nullptr;
 
     unsigned varCnt;
 
@@ -176,6 +178,7 @@ public:
     static CodeOp getLitEnd(ILStruct* ils);
     static CodeOp getTermOp(Instruction i, unsigned num);
     static CodeOp getGroundTermCheck(const Term* trm);
+    static CodeOp getSearchStructOp(SearchStruct* ss);
 
     bool equalsForOpMatching(const CodeOp& o) const;
 
@@ -192,6 +195,13 @@ public:
     inline bool isSearchStruct() const { return _instruction()==SEARCH_STRUCT; }
     inline bool isCheckFun() const { return _instruction()==CHECK_FUN; }
     inline bool isCheckGroundTerm() const { return _instruction()==CHECK_GROUND_TERM; }
+    /**
+     * True iff the execution never continues with the next operation in memory
+     * after this one, i.e. this is the last operation of a code block.
+     * (A LIT_END may be followed by its inline SUCCESS, see @b literalContinuation,
+     * but that is not a continuation of the block.)
+     */
+    inline bool isTerminal() const { return _instruction()==SUCCESS_OR_FAIL || _instruction()==LIT_END; }
 
     inline Term* getTargetTerm() const
     {
@@ -208,10 +218,19 @@ public:
     SearchStruct* getSearchStruct();
 
     inline CodeOp* alternative() const { return _alternative; }
-    inline CodeOp*& alternative() { return _alternative; }
-
     inline void setAlternative(CodeOp* op) { ASS_NEQ(op, this); _alternative=op; }
 
+    /**
+     * The alternative as an offset relative to this operation (0 if there is none).
+     * Both operations always lie in the same @b CodeTreeSubtree.
+     */
+    inline int32_t alternativeOffset() const
+    { return _alternative ? static_cast<int32_t>(_alternative-this) : 0; }
+    inline void setAlternativeOffset(int32_t ofs) { _alternative = ofs ? this+ofs : nullptr; }
+
+    CodeOp* literalContinuation();
+
+    /** Turn into a FAIL operation. The alternative is kept. */
     void makeFail() { static_assert(SUCCESS_OR_FAIL==0); _content = 0; }
 
     BITFIELD(64,
@@ -232,11 +251,52 @@ public:
     /**
      * Pointer to an alternative operation
      *
-     * If nonzero, either points to the first operation of
-     * a @b CodeBlock or to a @b landingOp of a @b SearchStruct.
+     * If nonzero, points either to the first operation of a code block or
+     * to a SEARCH_STRUCT operation, always in the same @b CodeTreeSubtree.
+     * When the subtree is moved in memory, the pointers are relocated.
      */
-    CodeOp* _alternative = 0;
+    CodeOp* _alternative = nullptr;
   };
+  static_assert(sizeof(CodeOp)==16);
+
+  /**
+   * A contiguous array of CodeOps holding the code of one literal level of
+   * the tree. It starts either at the root of the tree or at the first op that
+   * is executed after a LIT_END, and contains all the code blocks reachable from
+   * there up to (and including) the next LIT_ENDs. Each LIT_END refers (via its
+   * ILStruct) to the subtree that is executed after it.
+   *
+   * Alternatives point only within a subtree, so when the whole array is
+   * reallocated (when growing) the pointers are simply relocated.
+   *
+   * The CodeOps are stored right after the header.
+   */
+  struct CodeTreeSubtree
+  {
+    static CodeTreeSubtree* create(uint32_t capacity);
+    static void deallocate(CodeTreeSubtree* st);
+    /**
+     * Append @b n empty operations, possibly reallocating the subtree
+     * (in which case @b st is updated). Returns the index of the first one.
+     */
+    static uint32_t append(CodeTreeSubtree*& st, uint32_t n);
+
+    inline CodeOp* ops() { return reinterpret_cast<CodeOp*>(this+1); }
+    inline const CodeOp* ops() const { return reinterpret_cast<const CodeOp*>(this+1); }
+    inline CodeOp* root() { return ops(); }
+    inline CodeOp& operator[](size_t i) { ASS_L(i,_size); return ops()[i]; }
+    inline uint32_t size() const { return _size; }
+
+    static size_t bytesFor(uint32_t capacity) { return sizeof(CodeTreeSubtree)+sizeof(CodeOp)*capacity; }
+
+    uint32_t _size;
+    uint32_t _capacity;
+    /** (approximate) number of unreachable operations */
+    uint32_t _garbage;
+    /** size right after the last compaction (or creation) */
+    uint32_t _compactedSize;
+  };
+  static_assert(sizeof(CodeTreeSubtree)%alignof(CodeOp)==0);
 
   /**
    * A search structure that collects alternatives of the same
@@ -252,13 +312,14 @@ public:
      * an entry is inserted if not found.
      */
     template<bool doInsert>
-    bool getTargetOpPtr(const CodeOp& insertedOp, CodeOp**& tgt);
+    bool getTargetOpPtr(const CodeOp& insertedOp, int32_t*& tgt);
 
     /**
      * Returns code op in the structure matching the content
-     * of flat term entry @b ftPos.
+     * of flat term entry @b ftPos. The @b ssOp is the SEARCH_STRUCT
+     * operation referring to this structure.
      */
-    CodeOp* getTargetOp(const FlatTerm::Entry* ftPos);
+    CodeOp* getTargetOp(CodeOp* ssOp, const FlatTerm::Entry* ftPos);
     inline size_t length() const { return targets.size(); }
 
     enum Kind
@@ -267,14 +328,12 @@ public:
       GROUND_TERM_STRUCT
     };
 
-    /**
-     * Actual code op for this search structure. This construction
-     * implies that search structure operations cannot be stored
-     * in @b CodeBlock containers.
-     */
-    CodeOp landingOp;
     Kind kind;
-    std::vector<CodeOp*> targets;
+    /**
+     * Targets as offsets relative to the SEARCH_STRUCT operation
+     * (which lies in the same subtree as the targets), 0 means no target.
+     */
+    std::vector<int32_t> targets;
 
   protected:
     SearchStruct(Kind kind, size_t length);
@@ -294,7 +353,7 @@ public:
      * into @b values and @b targets. Otherwise, some code op is returned where
      * the entry should be (or is) stored as an alternative.
      */
-    template<bool doInsert> CodeOp*& targetOp(const T& val);
+    template<bool doInsert> int32_t& targetOp(const T& val);
 
     std::vector<T> values;
   };
@@ -302,7 +361,6 @@ public:
   using FnSearchStruct = SearchStructImpl<SearchStruct::FN_STRUCT>;
   using GroundTermSearchStruct = SearchStructImpl<SearchStruct::GROUND_TERM_STRUCT>;
 
-  typedef Vector<CodeOp> CodeBlock;
   typedef Stack<CodeOp> CodeStack;
   typedef DArray<TermList> BindingArray;
 
@@ -492,9 +550,8 @@ public:
 
   //////// auxiliary methods //////////
 
-  inline bool isEmpty() const { return !_entryPoint; }
-  inline CodeOp* getEntryPoint() const { ASS(!isEmpty()); return &(*_entryPoint)[0]; }
-  static CodeBlock* firstOpToCodeBlock(CodeOp* op);
+  inline bool isEmpty() const { return !_root; }
+  inline CodeOp* getEntryPoint() const { ASS(!isEmpty()); return _root->root(); }
 
   template<class Visitor>
   void visitAllOps(Visitor visitor) const;
@@ -529,16 +586,25 @@ public:
   using LitCompiler = Compiler<true>;
   using TermCompiler = Compiler<false>;
 
-  static CodeBlock* buildBlock(CodeStack& code, size_t cnt, ILStruct* prev);
   void incorporate(CodeStack& code);
 
-  template<SearchStruct::Kind k>
-  void compressCheckOps(CodeOp* chainStart);
+  static size_t appendSegment(CodeTreeSubtree*& st, CodeStack& code, size_t start, ILStruct* prev, uint32_t& firstIdx, ILStruct*& lastILS);
+  static void attachRest(CodeStack& code, size_t pos, ILStruct* ils);
+  static void disposeCode(CodeStack& code, size_t cnt);
 
+  template<SearchStruct::Kind k>
+  static void compressCheckOps(CodeTreeSubtree*& st, uint32_t chainStartIdx);
+
+  /** Re-lay out the reachable part of the subtree, dropping the garbage */
+  static void compact(CodeTreeSubtree*& st);
+  static void maybeCompact(CodeTreeSubtree*& st);
+  void destroySubtrees(CodeTreeSubtree* st);
 
   //////////// removal //////////////
 
   void optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp* removedOp);
+  static void killOp(CodeOp* op);
+  static bool removeDeadOp(Stack<CodeOp*>& firstsInBlocks, size_t fibStart, CodeOp* op, CodeTreeSubtree* st);
 
   void incTimeStamp();
 
@@ -550,8 +616,16 @@ public:
   /** maximal number of local variables in a stored term/literal (always at least 1) */
   unsigned _maxVarCnt = 1;
 
-  CodeBlock* _entryPoint = nullptr;
+  CodeTreeSubtree* _root = nullptr;
 };
+
+inline CodeTree::CodeOp* CodeTree::CodeOp::literalContinuation()
+{
+  ASS(isLitEnd());
+  auto* next = getILS()->next;
+  ASS(next || (this + 1)->isSuccess());
+  return next ? next->root() : this + 1;
+}
 
 }
 

@@ -9,6 +9,7 @@
  */
 
 #include "Test/SyntaxSugar.hpp"
+#include "Indexing/ClauseCodeTree.hpp"
 #include "Inferences/CodeTreeForwardSubsumptionAndResolution.hpp"
 #include "Inferences/BackwardSubsumptionAndResolution.hpp"
 
@@ -141,6 +142,44 @@ TEST_SIMPLIFICATION(pos_sub_test09,
     .expected({ /* subsumed */ })
     .justifications({ clause({ f(x) == g(y), y == e }) })
 )
+
+// Exercise both directions of the transition between an inline SUCCESS and
+// a shared continuation, including removal of duplicate index entries.
+TEST_FUN(shared_literal_continuation) {
+  MY_SYNTAX_SUGAR
+  Indexing::ClauseCodeTree tree;
+  auto* shortClause = clause({ p(f(x)) });
+  auto* longClause = clause({ p(f(x)), q(x) });
+  auto* query = clause({ p(f(c)), q(c) });
+
+  auto check = [&](unsigned expectedShort, unsigned expectedLong) {
+    Indexing::ClauseCodeTree::ClauseMatcher matcher;
+    matcher.init(&tree, query, false);
+    unsigned shorts = 0, longs = 0;
+    int resolved;
+    while (auto* match = matcher.next(resolved)) {
+      ASS(match == shortClause || match == longClause);
+      shorts += match == shortClause;
+      longs += match == longClause;
+    }
+    matcher.reset();
+    ASS_EQ(shorts, expectedShort);
+    ASS_EQ(longs, expectedLong);
+  };
+
+  for (bool shortFirst : {true, false}) {
+    tree.insert(shortFirst ? shortClause : longClause);
+    tree.insert(shortFirst ? longClause : shortClause);
+    tree.insert(shortClause);
+    check(2, 1);
+    tree.remove(shortClause);
+    check(1, 1);
+    tree.remove(longClause);
+    check(1, 0);
+    tree.remove(shortClause);
+    ASS(tree.isEmpty());
+  }
+}
 
 // negative subsumptions
 

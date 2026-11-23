@@ -32,7 +32,6 @@ using namespace Kernel;
 class ClauseCodeTree : public CodeTree
 {
 protected:
-  void onCodeOpDestroying(CodeOp* op) override;
   void printSuccess(std::ostream& out, const CodeOp& op) const override;
   
 public:

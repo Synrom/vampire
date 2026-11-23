@@ -12,6 +12,7 @@
  * Implements class CodeTree.
  */
 
+#include <algorithm>
 #include <utility>
 
 #include "Debug/RuntimeStatistics.hpp"
@@ -196,8 +197,7 @@ struct CodeTree::ILStruct::GVArrComparator
  */
 void CodeTree::ILStruct::putIntoSequence(ILStruct* previous_)
 {
-  previous=previous_;
-  depth=previous ? (previous->depth+1) : 0;
+  depth=previous_ ? previous_->depth+1 : 0;
 
   if(!varCnt) { return; }
 
@@ -333,6 +333,15 @@ CodeTree::CodeOp CodeTree::CodeOp::getGroundTermCheck(const Term* trm)
   return res;
 }
 
+CodeTree::CodeOp CodeTree::CodeOp::getSearchStructOp(SearchStruct* ss)
+{
+  CodeOp res;
+  res._setData(ss);
+  res._setInstruction(SEARCH_STRUCT);
+  ASS(res.isSearchStruct());
+  return res;
+}
+
 /**
  * Return true iff @b o is equal to the object for the purpose
  * of operation matching during cide insertion into the tree
@@ -361,13 +370,67 @@ bool CodeTree::CodeOp::equalsForOpMatching(const CodeOp& o) const
 const CodeTree::SearchStruct* CodeTree::CodeOp::getSearchStruct() const
 {
   ASS(isSearchStruct());
-  return GET_CONTAINING_OBJECT_CONST(CodeTree::SearchStruct,landingOp,this);
+  return _data<SearchStruct>();
 }
 
 CodeTree::SearchStruct* CodeTree::CodeOp::getSearchStruct()
 {
   ASS(isSearchStruct());
-  return GET_CONTAINING_OBJECT(CodeTree::SearchStruct,landingOp,this);
+  return _data<SearchStruct>();
+}
+
+//////////////// CodeTreeSubtree ////////////////////
+
+CodeTree::CodeTreeSubtree* CodeTree::CodeTreeSubtree::create(uint32_t capacity)
+{
+  ASS_G(capacity,0);
+  void* mem=ALLOC_KNOWN(bytesFor(capacity),"CodeTree::CodeTreeSubtree");
+  auto res=reinterpret_cast<CodeTreeSubtree*>(mem);
+  res->_size=0;
+  res->_capacity=capacity;
+  res->_garbage=0;
+  res->_compactedSize=0;
+  return res;
+}
+
+void CodeTree::CodeTreeSubtree::deallocate(CodeTreeSubtree* st)
+{
+  DEALLOC_KNOWN(st, bytesFor(st->_capacity), "CodeTree::CodeTreeSubtree");
+}
+
+uint32_t CodeTree::CodeTreeSubtree::append(CodeTreeSubtree*& st, uint32_t n)
+{
+  if(!st) {
+    st=create(n);
+    st->_compactedSize=n;
+  }
+  uint32_t res=st->_size;
+  if(res+n>st->_capacity) {
+    // grow geometrically, otherwise repeated insertions into
+    // the same subtree would be quadratic
+    uint32_t newCap=std::max(res+n, st->_capacity+st->_capacity/2);
+    CodeTreeSubtree* nst=create(newCap);
+    nst->_size=st->_size;
+    nst->_garbage=st->_garbage;
+    nst->_compactedSize=st->_compactedSize;
+    CodeOp* oldOps=st->ops();
+    CodeOp* newOps=nst->ops();
+    memcpy(static_cast<void*>(newOps), oldOps, sizeof(CodeOp)*st->_size);
+    //relocate the alternatives, which all point within the subtree
+    for(uint32_t i=0;i<st->_size;i++) {
+      if(newOps[i].alternative()) {
+        newOps[i].setAlternative(newOps+(newOps[i].alternative()-oldOps));
+      }
+    }
+    deallocate(st);
+    st=nst;
+  }
+  CodeOp* ops=st->ops()+res;
+  for(uint32_t i=0;i<n;i++) {
+    new(ops+i) CodeOp();
+  }
+  st->_size+=n;
+  return res;
 }
 
 std::string functorStr(unsigned functor, bool litStart)
@@ -441,7 +504,6 @@ void CodeTree::printOp(std::ostream& out, const CodeTree::CodeOp& op, bool litSt
 CodeTree::SearchStruct::SearchStruct(Kind kind, size_t length)
 : kind(kind)
 {
-  landingOp._setInstruction(SEARCH_STRUCT);
   ASS(length);
 
   targets.reserve(length);
@@ -460,7 +522,7 @@ void CodeTree::SearchStruct::destroy()
 }
 
 template<bool doInsert>
-bool CodeTree::SearchStruct::getTargetOpPtr(const CodeOp& insertedOp, CodeOp**& tgt)
+bool CodeTree::SearchStruct::getTargetOpPtr(const CodeOp& insertedOp, int32_t*& tgt)
 {
   switch(kind) {
   case FN_STRUCT:
@@ -477,21 +539,25 @@ bool CodeTree::SearchStruct::getTargetOpPtr(const CodeOp& insertedOp, CodeOp**& 
 }
 
 // expose for ClauseCodeTree.cpp
-template bool CodeTree::SearchStruct::getTargetOpPtr<false>(const CodeOp&, CodeOp**&);
+template bool CodeTree::SearchStruct::getTargetOpPtr<false>(const CodeOp&, int32_t*&);
 
-CodeTree::CodeOp* CodeTree::SearchStruct::getTargetOp(const FlatTerm::Entry* ftPos)
+CodeTree::CodeOp* CodeTree::SearchStruct::getTargetOp(CodeOp* ssOp, const FlatTerm::Entry* ftPos)
 {
   if(!ftPos->isFun()) { return 0; }
+  int32_t ofs;
   switch(kind) {
   case FN_STRUCT:
-    return static_cast<FnSearchStruct*>(this)->targetOp<false>(ftPos->_number());
+    ofs=static_cast<FnSearchStruct*>(this)->targetOp<false>(ftPos->_number());
+    break;
   case GROUND_TERM_STRUCT:
     ftPos++;
     ASS_EQ(ftPos->_tag(), FlatTerm::FUN_TERM_PTR);
-    return static_cast<GroundTermSearchStruct*>(this)->targetOp<false>(ftPos->_term());
+    ofs=static_cast<GroundTermSearchStruct*>(this)->targetOp<false>(ftPos->_term());
+    break;
   default:
     ASSERTION_VIOLATION;
   }
+  return ofs ? ssOp+ofs : nullptr;
 }
 
 template<CodeTree::SearchStruct::Kind k>
@@ -502,7 +568,7 @@ CodeTree::SearchStructImpl<k>::SearchStructImpl(size_t length)
 
 template<CodeTree::SearchStruct::Kind k>
 template<bool doInsert>
-CodeTree::CodeOp*& CodeTree::SearchStructImpl<k>::targetOp(const T& val)
+int32_t& CodeTree::SearchStructImpl<k>::targetOp(const T& val)
 {
   size_t left=0;
   size_t right=length()-1;
@@ -819,7 +885,7 @@ inline bool CodeTree::Matcher<removing, checkRange>::doSearchStruct()
   ASS_EQ(op->_instruction(), SEARCH_STRUCT);
 
   const FlatTerm::Entry* fte=&(*ft)[tp];
-  CodeOp* target=op->getSearchStruct()->getTargetOp(fte);
+  CodeOp* target=op->getSearchStruct()->getTargetOp(op, fte);
   if(!target) {
     return false;
   }
@@ -838,51 +904,42 @@ template struct CodeTree::Matcher<false, false>;
 
 CodeTree::~CodeTree()
 {
-  static Stack<CodeOp*> top_ops;
-  // each top_op is either a first op of a Block or a SearchStruct
-  // but it cannot be both since SearchStructs don't occur inside blocks
-  top_ops.reset();
-
-  if(!isEmpty()) { top_ops.push(getEntryPoint()); }
-
-  while(top_ops.isNonEmpty()) {
-    CodeOp* top_op = top_ops.pop();
-
-    if (top_op->isSearchStruct()) {
-      if(top_op->alternative()) {
-        top_ops.push(top_op->alternative());
-      }
-
-      auto ss = top_op->getSearchStruct();
-      for (size_t i = 0; i < ss->length(); i++) {
-        if (ss->targets[i]!=0) { // zeros are allowed as targets (they are holes after removals)
-          top_ops.push(ss->targets[i]);
-        }
-      }
-      ss->destroy();
-    } else {
-      CodeBlock* cb=firstOpToCodeBlock(top_op);
-
-      CodeOp* op=&(*cb)[0];
-      ASS_EQ(top_op,op);
-      for(size_t rem=cb->length(); rem; rem--,op++) {
-        onCodeOpDestroying(op);
-        if(op->alternative()) {
-          top_ops.push(op->alternative());
-        }
-      }
-      cb->deallocate();
-    }
+  if(!isEmpty()) {
+    destroySubtrees(_root);
+    _root=nullptr;
   }
 }
 
 /**
- * Return CodeBlock which contains @b op as its first operation
+ * Destroy the subtree @b st and all subtrees reachable from it.
+ *
+ * Operations that became unreachable (garbage) never own any
+ * resources, so we can simply go over the whole arrays.
  */
-CodeTree::CodeBlock* CodeTree::firstOpToCodeBlock(CodeOp* op)
+void CodeTree::destroySubtrees(CodeTreeSubtree* st)
 {
-  ASS(!op->isSearchStruct());
-  return GET_CONTAINING_OBJECT(CodeTree::CodeBlock,_array,op);
+  Stack<CodeTreeSubtree*> todo;
+  todo.push(st);
+  while(todo.isNonEmpty()) {
+    st=todo.pop();
+    for(uint32_t i=0;i<st->size();i++) {
+      CodeOp* op=&(*st)[i];
+      if(op->isSearchStruct()) {
+        op->getSearchStruct()->destroy();
+        continue;
+      }
+      if(op->isLitEnd()) {
+        ILStruct* ils=op->getILS();
+        if(ils->next) {
+          todo.push(ils->next);
+        }
+        delete ils;
+        continue;
+      }
+      onCodeOpDestroying(op);
+    }
+    CodeTreeSubtree::deallocate(st);
+  }
 }
 
 
@@ -890,10 +947,8 @@ template<class Visitor>
 void CodeTree::visitAllOps(Visitor visitor) const
 {
   // operation, depth, and flag indicating whether the next functor is a predicate
-  static Stack<tuple<CodeOp*,unsigned,bool>> top_ops;
-  // each top_op is either a first op of a Block or a SearchStruct
-  // but it cannot be both since SearchStructs don't occur inside blocks
-  top_ops.reset();
+  Stack<tuple<CodeOp*,unsigned,bool>> top_ops;
+  // each top_op is either a first op of a block or a SEARCH_STRUCT
 
   if(!isEmpty()) { top_ops.emplace(getEntryPoint(),0,_clauseCodeTree); }
 
@@ -901,7 +956,7 @@ void CodeTree::visitAllOps(Visitor visitor) const
     auto [top_op,depth,litStart] = top_ops.pop();
 
     if (top_op->isSearchStruct()) {
-      visitor(top_op, depth, litStart); // visit the landingOp inside the SearchStruct
+      visitor(top_op, depth, litStart);
 
       if(top_op->alternative()) {
         top_ops.emplace(top_op->alternative(),depth,litStart);
@@ -910,24 +965,31 @@ void CodeTree::visitAllOps(Visitor visitor) const
       auto ss = top_op->getSearchStruct();
       for (size_t i = 0; i < ss->length(); i++) {
         if (ss->targets[i]!=0) { // zeros are allowed as targets (they are holes after removals)
-          top_ops.emplace(ss->targets[i],depth+1,litStart);
+          top_ops.emplace(top_op+ss->targets[i],depth+1,litStart);
         }
       }
-    } else {
-      CodeBlock* cb=firstOpToCodeBlock(top_op);
-
-      CodeOp* op=&(*cb)[0];
-      ASS_EQ(top_op,op);
-      for(size_t rem=cb->length(); rem; rem--,op++) {
-        visitor(op, depth+(cb->length()-rem), litStart);
-        if(op->alternative()) {
-          top_ops.emplace(op->alternative(),depth+(cb->length()-rem),litStart);
-        }
-        litStart = op->isLitEnd();
+      continue;
+    }
+    CodeOp* op=top_op;
+    for(;;) {
+      visitor(op, depth, litStart);
+      if(op->alternative()) {
+        top_ops.emplace(op->alternative(),depth,litStart);
       }
+      if(op->isLitEnd()) {
+        top_ops.emplace(op->literalContinuation(),depth+1,true);
+        break;
+      }
+      if(op->isTerminal()) {
+        break;
+      }
+      litStart=false;
+      op++;
+      depth++;
     }
   }
 }
+
 
 void CodeTree::printOps(std::ostream& out, const CodeTree& ct, const CodeTree::CodeStack& st) const
 {
@@ -1072,30 +1134,80 @@ template struct CodeTree::Compiler<true>;
 template struct CodeTree::Compiler<false>;
 
 /**
- * Build CodeBlock object from the last @b cnt instructions on the
- * @b code stack.
- *
- * In this function is also set the value for the @b ILStruct::previous
- * members.
+ * Delete the ILStruct objects of the LIT_END operations among the first
+ * @b cnt operations of @b code (these operations were matched with the
+ * tree and are therefore not used) and empty the stack.
  */
-CodeTree::CodeBlock* CodeTree::buildBlock(CodeStack& code, size_t cnt, ILStruct* prev)
+void CodeTree::disposeCode(CodeStack& code, size_t cnt)
 {
-  size_t clen=code.length();
-  ASS_LE(cnt,clen);
-
-  CodeBlock* res=CodeBlock::allocate(cnt);
-  size_t sOfs=clen-cnt;
+  ASS_LE(cnt,code.size());
   for(size_t i=0;i<cnt;i++) {
-    CodeOp& op=code[i+sOfs];
-    ASS_EQ(op.alternative(),0); //the ops should not have an alternative set yet
+    if(code[i].isLitEnd()) {
+      delete code[i].getILS();
+    }
+  }
+  code.reset();
+}
+
+/**
+ * Append to the subtree @b st (it is created if null) the operations of
+ * @b code starting at @b start up to the first LIT_END (or SUCCESS). If the
+ * LIT_END is immediately followed by the final SUCCESS, the SUCCESS is
+ * appended as well, as the inline success of the LIT_END.
+ *
+ * This also sets the depth of each new ILStruct.
+ *
+ * Into @b firstIdx is assigned the index of the first appended op, into
+ * @b lastILS the ILStruct of the appended LIT_END (or nullptr). Returns the
+ * position in @b code after the appended operations.
+ */
+size_t CodeTree::appendSegment(CodeTreeSubtree*& st, CodeStack& code, size_t start, ILStruct* prev, uint32_t& firstIdx, ILStruct*& lastILS)
+{
+  size_t clen=code.size();
+  size_t end=start;
+  while(!code[end].isTerminal()) {
+    end++;
+    ASS_L(end,clen);
+  }
+  if(code[end].isLitEnd() && end+1<clen && code[end+1].isSuccess()) {
+    end++;
+  }
+  end++;
+
+  firstIdx=CodeTreeSubtree::append(st, end-start);
+  CodeOp* tgt=&(*st)[firstIdx];
+  lastILS=nullptr;
+  for(size_t i=start;i<end;i++,tgt++) {
+    CodeOp& op=code[i];
+    ASS(!op.alternative()); //the ops should not have an alternative set yet
     if(op.isLitEnd()) {
       ILStruct* ils=op.getILS();
       ils->putIntoSequence(prev);
-      prev=ils;
+      ASS(!ils->next);
+      lastILS=ils;
     }
-    (*res)[i]=op;
+    *tgt=op;
   }
-  return res;
+  return end;
+}
+
+/**
+ * Create subtrees for the literals of @b code from @b pos on.
+ * The first of them becomes the next subtree of @b ils.
+ */
+void CodeTree::attachRest(CodeStack& code, size_t pos, ILStruct* ils)
+{
+  while(pos<code.size()) {
+    ASS(ils);
+    ASS(!ils->next);
+    CodeTreeSubtree* st=nullptr;
+    uint32_t firstIdx;
+    ILStruct* last;
+    pos=appendSegment(st, code, pos, ils, firstIdx, last);
+    ASS_EQ(firstIdx,0);
+    ils->next=st;
+    ils=last;
+  }
 }
 
 /**
@@ -1107,7 +1219,10 @@ void CodeTree::incorporate(CodeStack& code)
   ASS(code.top().isSuccess());
 
   if(isEmpty()) {
-    _entryPoint=buildBlock(code, code.length(), 0);
+    uint32_t firstIdx;
+    ILStruct* last;
+    size_t pos=appendSegment(_root, code, 0, nullptr, firstIdx, last);
+    attachRest(code, pos, last);
     code.reset();
     return;
   }
@@ -1116,138 +1231,151 @@ void CodeTree::incorporate(CodeStack& code)
   static const unsigned checkGroundTermOpThreshold=3; //must be greater than 1 or it would cause loops
 
   size_t clen=code.length();
-  CodeOp** tailTarget;
-  size_t matchedCnt;
+  //the pointer referring to the subtree we are in (pointers to subtrees
+  //are stable while the subtrees themselves may be reallocated)
+  CodeTreeSubtree** stRef=&_root;
   ILStruct* lastMatchedILS=0;
+  //index of the current operation in the subtree
+  uint32_t cur=0;
+  //the new code is attached either as the alternative of the op at index
+  //tailIdx, or to the SEARCH_STRUCT slot tailSlot of the SEARCH_STRUCT at tailIdx
+  uint32_t tailIdx=0;
+  int32_t* tailSlot=nullptr;
+  size_t i=0;
 
-  {
-    CodeOp* treeOp = getEntryPoint();
-
-    for (size_t i = 0; i < clen; i++) {
-      CodeOp* chainStart = treeOp;
-      size_t checkFunOps = 0;
-      size_t checkGroundTermOps = 0;
-      for (;;) {
-        if (treeOp->isSearchStruct()) {
-          //handle the SEARCH_STRUCT
-          SearchStruct* ss = treeOp->getSearchStruct();
-          CodeOp** toPtr;
-          if (ss->getTargetOpPtr<true>(code[i], toPtr)) {
-            if (!*toPtr) {
-              tailTarget = toPtr;
-              matchedCnt = i;
-              goto matching_done;
-            }
-            treeOp = *toPtr;
-            continue;
+  for(;;i++) {
+    ASS_L(i,clen);
+    uint32_t chainStart=cur;
+    size_t checkFunOps=0;
+    size_t checkGroundTermOps=0;
+    for(;;) {
+      CodeOp* treeOp=&(**stRef)[cur];
+      if(treeOp->isSearchStruct()) {
+        //handle the SEARCH_STRUCT
+        int32_t* toPtr;
+        if(treeOp->getSearchStruct()->getTargetOpPtr<true>(code[i], toPtr)) {
+          if(!*toPtr) {
+            tailIdx=cur;
+            tailSlot=toPtr;
+            goto matching_done;
           }
-        } else if (code[i].equalsForOpMatching(*treeOp)) {
-          //matched, go to the next compiled instruction
-          break;
+          cur+=*toPtr;
+          continue;
         }
-
-        if (treeOp->alternative()) {
-          //try alternative if there is some
-          treeOp = treeOp->alternative();
-        } else {
-          //matching failed, we'll add the new branch here
-          tailTarget = &treeOp->alternative();
-          matchedCnt = i;
-          goto matching_done;
-        }
-
-        if (treeOp->isCheckFun()) {
-          checkFunOps++;
-          //if there were too many CHECK_FUN alternative operations, put them
-          //into a SEARCH_STRUCT
-          if (checkFunOps > checkFunOpThreshold) {
-            //we put CHECK_FUN ops into the SEARCH_STRUCT op, and
-            //restart with the chain
-            compressCheckOps<SearchStruct::FN_STRUCT>(chainStart);
-            treeOp = chainStart;
-            checkFunOps = 0;
-            checkGroundTermOps = 0;
-            continue;
-          }
-        }
-
-        if (treeOp->isCheckGroundTerm()) {
-          checkGroundTermOps++;
-          //if there were too many CHECK_GROUND_TERM alternative operations, put them
-          //into a SEARCH_STRUCT
-          if (checkGroundTermOps > checkGroundTermOpThreshold) {
-            //we put CHECK_GROUND_TERM ops into the SEARCH_STRUCT op, and
-            //restart with the chain
-            compressCheckOps<SearchStruct::GROUND_TERM_STRUCT>(chainStart);
-            treeOp = chainStart;
-            checkFunOps = 0;
-            checkGroundTermOps = 0;
-            continue;
-          }
-        }
-      } // for(;;)
-
-      if (treeOp->isLitEnd()) {
-        lastMatchedILS = treeOp->getILS();
+      } else if(!code[i].isSuccess() && code[i].equalsForOpMatching(*treeOp)) {
+        //matched, go to the next compiled instruction
+        //(SUCCESS operations are never shared, so we insert an
+        //entry multiple times if needed, since later we may be
+        //removing it multiple times as well)
+        break;
       }
 
-      //the SEARCH_STRUCT operation does not occur in a CodeBlock
-      ASS(!treeOp->isSearchStruct());
-      //we can safely do increase because as long as we match and something
-      //remains in the @b code stack, we aren't at the end of the CodeBlock
-      //either (as each code block contains at least one FAIL or SUCCESS
-      //operation, and CodeStack contains at most one SUCCESS as the last
-      //operation)
-      treeOp++;
-    }
-    //We matched the whole CodeStack. If we are here, we are inserting an
-    //item multiple times. We will insert it anyway, because later we may
-    //be removing it multiple times as well.
-    matchedCnt = clen - 1;
+      if(treeOp->alternative()) {
+        //try alternative if there is some
+        cur+=treeOp->alternativeOffset();
+      } else {
+        //matching failed, we'll add the new branch here
+        tailIdx=cur;
+        goto matching_done;
+      }
+      treeOp=&(**stRef)[cur];
 
-    //we need to find where to put it
-    while (treeOp->alternative()) {
-      treeOp = treeOp->alternative();
+      if(treeOp->isCheckFun()) {
+        checkFunOps++;
+        //if there were too many CHECK_FUN alternative operations, put them
+        //into a SEARCH_STRUCT
+        if(checkFunOps>checkFunOpThreshold) {
+          //we put CHECK_FUN ops into the SEARCH_STRUCT op, and
+          //restart with the chain
+          compressCheckOps<SearchStruct::FN_STRUCT>(*stRef, chainStart);
+          cur=chainStart;
+          checkFunOps=0;
+          checkGroundTermOps=0;
+          continue;
+        }
+      }
+
+      if(treeOp->isCheckGroundTerm()) {
+        checkGroundTermOps++;
+        //if there were too many CHECK_GROUND_TERM alternative operations, put them
+        //into a SEARCH_STRUCT
+        if(checkGroundTermOps>checkGroundTermOpThreshold) {
+          //we put CHECK_GROUND_TERM ops into the SEARCH_STRUCT op, and
+          //restart with the chain
+          compressCheckOps<SearchStruct::GROUND_TERM_STRUCT>(*stRef, chainStart);
+          cur=chainStart;
+          checkFunOps=0;
+          checkGroundTermOps=0;
+          continue;
+        }
+      }
+    } // for(;;)
+
+    CodeOp* treeOp=&(**stRef)[cur];
+    if(treeOp->isLitEnd()) {
+      lastMatchedILS=treeOp->getILS();
+      if (!lastMatchedILS->next) {
+        // A second branch needs an ordinary subtree. Preserve the old SUCCESS
+        // as its root so alternatives retain their original execution order.
+        ASS((treeOp+1)->isSuccess());
+        CodeTreeSubtree::append(lastMatchedILS->next, 1);
+        *lastMatchedILS->next->root() = treeOp[1];
+        treeOp[1].makeFail();
+        ++(*stRef)->_garbage;
+      }
+      //continue in the subtree of the next literal
+      stRef=&lastMatchedILS->next;
+      cur=0;
+      continue;
     }
-    tailTarget = &treeOp->alternative();
+
+    //we can safely do increase because as long as we match and something
+    //remains in the @b code stack, we aren't at the end of the code block
+    ASS(!treeOp->isTerminal());
+    ASS(!treeOp->isSearchStruct());
+    cur++;
   }
+
 matching_done:
-
-  ASS_L(matchedCnt,clen);
+  ASS_L(i,clen);
   RSTAT_MCTR_INC("alt split literal", lastMatchedILS ? (lastMatchedILS->depth+1) : 0);
-
-  CodeBlock* rem=buildBlock(code, clen-matchedCnt, lastMatchedILS);
-  *tailTarget=&(*rem)[0];
-  LOG_OP(rem->toString()<<" incorporated, mismatch caused by "<<code[matchedCnt].toString());
-
-  //truncate the part that was used and thus does not need disposing
-  code.truncate(matchedCnt);
-  //dispose of the unused code
-  while(code.isNonEmpty()) {
-    if(code.top().isLitEnd()) {
-      delete code.top().getILS();
+  {
+    uint32_t firstIdx;
+    ILStruct* last;
+    size_t pos=appendSegment(*stRef, code, i, lastMatchedILS, firstIdx, last);
+    if(tailSlot) {
+      //the SearchStruct is not stored in the subtree, so tailSlot is still valid
+      *tailSlot=static_cast<int32_t>(firstIdx)-static_cast<int32_t>(tailIdx);
+    } else {
+      CodeOp* tail=&(**stRef)[tailIdx];
+      tail->setAlternative(&(**stRef)[firstIdx]);
     }
-    code.pop();
+    if(pos<clen) {
+      attachRest(code, pos, last);
+    }
   }
+  maybeCompact(*stRef);
+  disposeCode(code, i);
 }
 
 template<CodeTree::SearchStruct::Kind k>
-void CodeTree::compressCheckOps(CodeOp* chainStart)
+void CodeTree::compressCheckOps(CodeTreeSubtree*& st, uint32_t chainStartIdx)
 {
-  ASS(chainStart->alternative());
+  ASS((*st)[chainStartIdx].alternative());
 
-  static Stack<CodeOp*> toDo;
-  static Stack<CodeOp*> chfOps;
-  static Stack<CodeOp*> otherOps;
+  static Stack<uint32_t> toDo;
+  static Stack<uint32_t> chfOps;
+  static Stack<uint32_t> otherOps;
   toDo.reset();
   chfOps.reset();
   otherOps.reset();
 
-  toDo.push(chainStart->alternative());
+  toDo.push(chainStartIdx+(*st)[chainStartIdx].alternativeOffset());
   while (toDo.isNonEmpty()) {
-    CodeOp* op = toDo.pop();
+    uint32_t idx = toDo.pop();
+    CodeOp* op = &(*st)[idx];
     if (op->alternative()) {
-      toDo.push(op->alternative());
+      toDo.push(idx+op->alternativeOffset());
     }
     bool ofKind;
     if constexpr (k == SearchStruct::FN_STRUCT) {
@@ -1257,21 +1385,25 @@ void CodeTree::compressCheckOps(CodeOp* chainStart)
     }
 
     if (ofKind) {
-      chfOps.push(op);
+      chfOps.push(idx);
     } else if (op->isSearchStruct()) {
       auto ss = op->getSearchStruct();
       if (ss->kind == k) {
         for (size_t i = 0; i < ss->length(); i++) {
           if (ss->targets[i]) {
-            toDo.push(ss->targets[i]);
+            toDo.push(idx+ss->targets[i]);
           }
         }
         ss->destroy();
+        //the op becomes garbage
+        op->makeFail();
+        op->setAlternativeOffset(0);
+        st->_garbage++;
       } else {
-        otherOps.push(op);
+        otherOps.push(idx);
       }
     } else {
-      otherOps.push(op);
+      otherOps.push(idx);
     }
   }
 
@@ -1279,37 +1411,297 @@ void CodeTree::compressCheckOps(CodeOp* chainStart)
   size_t slen=chfOps.size();
   auto res=new SearchStructImpl<k>(slen);
 
-  sort(chfOps.begin(), chfOps.end(), [](CodeOp* op1, CodeOp* op2) {
+  CodeOp* ops=st->ops();
+  sort(chfOps.begin(), chfOps.end(), [ops](uint32_t i1, uint32_t i2) {
     if constexpr (k==SearchStruct::FN_STRUCT) {
-      return op1->_arg() < op2->_arg();
+      return ops[i1]._arg() < ops[i2]._arg();
     } else {
-      return op1->getTargetTerm() < op2->getTargetTerm();
+      return ops[i1].getTargetTerm() < ops[i2].getTargetTerm();
     }
   });
 
+  //the SEARCH_STRUCT op is put at the end of the subtree
+  uint32_t ssIdx=CodeTreeSubtree::append(st,1);
+  ops=st->ops();
+  ops[ssIdx]=CodeOp::getSearchStructOp(res);
+
   for(size_t i=0;i<slen;i++) {
+    CodeOp& chf=ops[chfOps[i]];
     if constexpr (k==SearchStruct::FN_STRUCT) {
-      ASS(chfOps[i]->isCheckFun());
-      res->values.push_back(chfOps[i]->_arg());
+      ASS(chf.isCheckFun());
+      res->values.push_back(chf._arg());
     } else {
-      ASS(chfOps[i]->isCheckGroundTerm());
-      res->values.push_back(chfOps[i]->getTargetTerm());
+      ASS(chf.isCheckGroundTerm());
+      res->values.push_back(chf.getTargetTerm());
     }
-    res->targets.push_back(chfOps[i]);
-    chfOps[i]->setAlternative(0);
+    res->targets.push_back(static_cast<int32_t>(chfOps[i])-static_cast<int32_t>(ssIdx));
+    chf.setAlternativeOffset(0);
   }
 
-  CodeOp* op=&res->landingOp;
-  chainStart->setAlternative(op);
+  CodeOp* op=&ops[ssIdx];
+  ops[chainStartIdx].setAlternative(op);
   while(otherOps.isNonEmpty()) {
-    CodeOp* next=otherOps.pop();
+    CodeOp* next=&ops[otherOps.pop()];
     op->setAlternative(next);
     op=next;
   }
-  op->setAlternative(0);
+  op->setAlternativeOffset(0);
+}
+
+void CodeTree::maybeCompact(CodeTreeSubtree*& st)
+{
+  if(!st) {
+    return;
+  }
+  // Compact when at least half of the subtree is garbage, and also each
+  // time the subtree doubled its size by appends, to restore locality of
+  // the layout. Both are amortized constant per operation.
+  if(st->_garbage*2>st->_size ||
+     (st->_size>=32 && st->_size>=2*st->_compactedSize)) {
+    compact(st);
+  }
+}
+
+/**
+ * Re-lay out the reachable operations of the subtree in the depth-first
+ * order of code blocks, so that each block is followed by its alternatives,
+ * and drop the garbage.
+ */
+void CodeTree::compact(CodeTreeSubtree*& st)
+{
+  static constexpr uint32_t NONE=std::numeric_limits<uint32_t>::max();
+
+  uint32_t n=st->size();
+  CodeOp* ops=st->ops();
+
+  std::vector<uint32_t> map(n,NONE);
+  static Stack<uint32_t> order;
+  static Stack<uint32_t> work;
+  static Stack<uint32_t> alts;
+  order.reset();
+  work.reset();
+
+  //a failing root can be replaced by its alternative (unless it is a SEARCH_STRUCT,
+  //which cannot be the first operation of the subtree)
+  uint32_t rootIdx=0;
+  while(ops[rootIdx].isFail() && ops[rootIdx].alternative() && !ops[rootIdx].alternative()->isSearchStruct()) {
+    rootIdx+=ops[rootIdx].alternativeOffset();
+  }
+  work.push(rootIdx);
+
+  //push the collected alternatives so that the first one is processed first
+  auto pushAlts = [&]() {
+    while(alts.isNonEmpty()) {
+      work.push(alts.pop());
+    }
+  };
+
+  while(work.isNonEmpty()) {
+    uint32_t b=work.pop();
+    ASS_EQ(map[b],NONE);
+    alts.reset();
+    if(ops[b].isSearchStruct()) {
+      map[b]=order.size();
+      order.push(b);
+      for(auto t : ops[b].getSearchStruct()->targets) {
+        if(t) {
+          alts.push(b+t);
+        }
+      }
+      if(ops[b].alternative()) {
+        alts.push(b+ops[b].alternativeOffset());
+      }
+      pushAlts();
+      continue;
+    }
+    uint32_t kIdx=b;
+    for(;;) {
+      map[kIdx]=order.size();
+      order.push(kIdx);
+      if(ops[kIdx].alternative()) {
+        alts.push(kIdx+ops[kIdx].alternativeOffset());
+      }
+      if(ops[kIdx].isTerminal()) {
+        break;
+      }
+      kIdx++;
+    }
+    if(ops[kIdx].isLitEnd() && !ops[kIdx].getILS()->next) {
+      ASS(ops[kIdx+1].isSuccess());
+      order.push(kIdx+1);
+    }
+    pushAlts();
+  }
+
+  uint32_t m=order.size();
+  CodeTreeSubtree* nst=CodeTreeSubtree::create(std::max(m,1u));
+  nst->_size=m;
+  nst->_compactedSize=m;
+  CodeOp* nops=nst->ops();
+  for(uint32_t i=0;i<m;i++) {
+    uint32_t o=order[i];
+    nops[i]=ops[o];
+    if(ops[o].alternativeOffset()) {
+      uint32_t t=o+ops[o].alternativeOffset();
+      ASS_NEQ(map[t],NONE);
+      nops[i].setAlternativeOffset(static_cast<int32_t>(map[t])-static_cast<int32_t>(i));
+    }
+    if(ops[o].isSearchStruct()) {
+      for(auto& t : ops[o].getSearchStruct()->targets) {
+        if(t) {
+          ASS_NEQ(map[o+t],NONE);
+          t=static_cast<int32_t>(map[o+t])-static_cast<int32_t>(i);
+        }
+      }
+    }
+  }
+  CodeTreeSubtree::deallocate(st);
+  st=nst;
 }
 
 //////////// removal //////////////
+
+/**
+ * Turn @b op into FAIL (keeping its alternative), releasing what it owns.
+ */
+void CodeTree::killOp(CodeOp* op)
+{
+  ASS(!op->isSearchStruct());
+  if(op->isLitEnd()) {
+    ASS(!op->getILS()->next);
+    delete op->getILS();
+  }
+  op->makeFail();
+}
+
+/**
+ * Remove the terminal operation @b op, which does not lead to any stored
+ * entry anymore, and unlink the code that becomes unnecessary because of it.
+ *
+ * The first operations of the code blocks on the path to @b op within the
+ * subtree @b st are on the @b firstsInBlocks stack above the position
+ * @b fibStart (the top one is the first operation of the block containing @b op).
+ *
+ * Return true iff the whole subtree @b st became unreachable (it is then
+ * up to the caller to deallocate it).
+ */
+bool CodeTree::removeDeadOp(Stack<CodeOp*>& firstsInBlocks, size_t fibStart, CodeOp* op, CodeTreeSubtree* st)
+{
+  ASS(op->isTerminal());
+  killOp(op);
+
+  ASS_G(firstsInBlocks.size(),fibStart);
+  CodeOp* firstOp=firstsInBlocks.pop();
+  //the last operation of the part of the block that is dead
+  CodeOp* deadEnd=op;
+  for(;;) {
+    //firstOp is the first op of a block that contains op
+    ASS(!firstOp->isSearchStruct());
+    ASS_LE(firstOp, op);
+
+    while(op>firstOp && !op->alternative()) { ASS(!op->isSuccess()); op--; }
+
+    if(op!=firstOp) {
+      ASS(op->alternative());
+      //we only change the instruction, the alternative must remain unchanged
+      killOp(op);
+      st->_garbage+=deadEnd-op;
+      return false;
+    }
+    CodeOp* alt=firstOp->alternative();
+
+    if(firstsInBlocks.size()==fibStart) {
+      //the block is at the root of the subtree, which must stay at its place
+      ASS_EQ(firstOp,st->root());
+      if(alt) {
+        killOp(firstOp);
+        st->_garbage+=deadEnd-firstOp;
+        return false;
+      }
+      return true;
+    }
+
+    //the whole block is unreachable now
+    st->_garbage+=deadEnd-firstOp+1;
+    CodeOp firstOpCopy=*firstOp;
+
+    //first operation in the block that points to the current one
+    CodeOp* prevFirstOp=firstsInBlocks.pop();
+
+    if(prevFirstOp->isSearchStruct()) {
+      if(prevFirstOp->alternative()==firstOp) {
+        //firstOp was an alternative to the SearchStruct
+        prevFirstOp->setAlternative(alt);
+        return false;
+      }
+      auto ss=prevFirstOp->getSearchStruct();
+      int32_t* tgtPtr;
+      ALWAYS(ss->getTargetOpPtr<false>(firstOpCopy, tgtPtr));
+      ASS_EQ(prevFirstOp+*tgtPtr, firstOp);
+      *tgtPtr=alt ? static_cast<int32_t>(alt-prevFirstOp) : 0;
+      if(alt) {
+        ASS( (ss->kind==SearchStruct::FN_STRUCT && alt->isCheckFun()) ||
+            (ss->kind==SearchStruct::GROUND_TERM_STRUCT && alt->isCheckGroundTerm()) );
+        return false;
+      }
+      for(size_t i=0; i<ss->length(); i++) {
+        if(ss->targets[i]!=0) {
+          //the SearchStruct still contains something, so we won't delete it
+          //TODO: we might want to compress the SearchStruct, if there are too many zeroes
+          return false;
+        }
+      }
+
+      //if we're at this point, the SEARCH_STRUCT will be deleted
+      firstOp=prevFirstOp;
+      alt=firstOp->alternative();
+      ss->destroy();
+      firstOp->makeFail();
+      firstOp->setAlternativeOffset(0);
+      st->_garbage++;
+
+      //now let's continue as if there wasn't any SEARCH_STRUCT operation:)
+
+      //the SEARCH_STRUCT is never the first operation in a subtree
+      ASS_G(firstsInBlocks.size(),fibStart);
+      prevFirstOp=firstsInBlocks.pop();
+      //there never are two nested SEARCH_STRUCT operations
+      ASS(!prevFirstOp->isSearchStruct());
+    }
+
+    //operation that points to the current block
+    CodeOp* pointingOp=prevFirstOp;
+    while(pointingOp->alternative()!=firstOp) {
+      ASS(!pointingOp->isTerminal());
+      pointingOp++;
+    }
+    pointingOp->setAlternative(alt);
+
+    //check whether the rest of the block after pointingOp is dead
+    CodeOp* prevOp=pointingOp;
+    if(!prevOp->isTerminal()) {
+      prevOp++;
+      for(;;) {
+        if(prevOp->alternative()) {
+          //there is an operation after the pointingOp that cannot be lost
+          return false;
+        }
+        if(prevOp->isTerminal()) {
+          break;
+        }
+        prevOp++;
+      }
+    }
+    if(!prevOp->isFail()) {
+      //a SUCCESS or a LIT_END (all LIT_ENDs in the tree lead somewhere)
+      return false;
+    }
+
+    deadEnd=prevOp;
+    firstOp=prevFirstOp;
+    op=pointingOp;
+  }
+}
 
 void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp* removedOp)
 {
@@ -1317,136 +1709,15 @@ void CodeTree::optimizeMemoryAfterRemoval(Stack<CodeOp*>* firstsInBlocks, CodeOp
   LOG_OP("Code tree removal memory optimization");
   LOG_OP("firstsInBlocks->size()="<<firstsInBlocks->size());
 
-  //now let us remove unnecessary instructions and the free memory
-
-  CodeOp* op=removedOp;
-  ASS(firstsInBlocks->isNonEmpty());
-  CodeOp* firstOp=firstsInBlocks->pop();
-  for(;;) {
-    //firstOp is in a CodeBlock
-    ASS(!firstOp->isSearchStruct());
-    //op is in the CodeBlock starting at firstOp
-    ASS_LE(firstOp, op);
-    ASS_G(firstOp+firstOpToCodeBlock(firstOp)->length(), op);
-
-    while(op>firstOp && !op->alternative()) { ASS(!op->isSuccess()); op--; }
-
-    ASS(!op->isSuccess());
-
-    if(op!=firstOp) {
-      ASS(op->alternative());
-      //we only change the instruction, the alternative must remain unchanged
-      op->makeFail();
-      return;
-    }
-    CodeOp* alt=firstOp->alternative();
-
-    CodeBlock* cb=firstOpToCodeBlock(firstOp);
-
-    if(firstsInBlocks->isEmpty() && alt && alt->isSearchStruct()) {
-      //We should remove the CodeBlock referenced by _entryPoint, but
-      //we cannot replace it by its alternative as it is not a CodeBlock
-      //(it's a SearchStruct). Therefore w will not delete it, just set
-      //the first operation to fail.
-      ASS_EQ(cb,_entryPoint);
-      firstOp->makeFail();
-      return;
-    }
-
-    CodeOp firstOpCopy= *firstOp;
-
-    if(_clauseCodeTree) {
-      //delete ILStruct objects
-      size_t cbLen=cb->length();
-      for(size_t i=0;i<cbLen;i++) {
-        if((*cb)[i].isLitEnd()) {
-          delete (*cb)[i].getILS();
-        }
-      }
-    }
-    cb->deallocate(); //from now on we mustn't dereference firstOp
-
-    if(firstsInBlocks->isEmpty()) {
-      ASS(!alt || !alt->isSearchStruct());
-      ASS_EQ(cb,_entryPoint);
-      _entryPoint=alt ? firstOpToCodeBlock(alt) : 0;
-      return;
-    }
-
-    //first operation in the CodeBlock that points to the current one (i.e. cb)
-    CodeOp* prevFirstOp=firstsInBlocks->pop();
-
-    if(prevFirstOp->isSearchStruct()) {
-      if(prevFirstOp->alternative()==firstOp) {
-        //firstOp was an alternative to the SearchStruct
-        prevFirstOp->setAlternative(alt);
-        return;
-      }
-      auto ss = prevFirstOp->getSearchStruct();
-      CodeOp** tgtPtr;
-      ALWAYS(ss->getTargetOpPtr<false>(firstOpCopy, tgtPtr));
-      ASS_EQ(*tgtPtr, firstOp);
-      *tgtPtr=alt;
-      if(alt) {
-        ASS( (ss->kind==SearchStruct::FN_STRUCT && alt->isCheckFun()) ||
-            (ss->kind==SearchStruct::GROUND_TERM_STRUCT && alt->isCheckGroundTerm()) );
-        return;
-      }
-      for(size_t i=0; i<ss->length(); i++) {
-        if(ss->targets[i]!=0) {
-          //the SearchStruct still contains something, so we won't delete it
-          //TODO: we might want to compress the SearchStruct, if there are too many zeroes
-          return;
-        }
-      }
-
-      //if we're at this point, the SEARCH_STRUCT will be deleted
-      firstOp=&ss->landingOp;
-      alt=ss->landingOp.alternative();
-      ss->destroy();
-
-      //now let's continue as if there wasn't any SEARCH_STRUCT operation:)
-
-      //the SEARCH_STRUCT is never the first operation in the CodeTree
-      ASS(firstsInBlocks->isNonEmpty());
-      prevFirstOp=firstsInBlocks->pop();
-      //there never are two nested SEARCH_STRUCT operations
-      ASS(!prevFirstOp->isSearchStruct());
-    }
-
-    CodeBlock* pcb=firstOpToCodeBlock(prevFirstOp);
-
-    //operation that points to the current CodeBlock
-    CodeOp* pointingOp=0;
-
-    CodeOp* prevAfterLastOp=prevFirstOp+pcb->length();
-    CodeOp* prevOp=prevFirstOp;
-    while(prevOp->alternative()!=firstOp) {
-      ASS_L(prevOp,prevAfterLastOp);
-      prevOp++;
-    }
-    pointingOp=prevOp;
-
-    pointingOp->setAlternative(alt);
-    if(pointingOp->isSuccess()) {
-      return;
-    }
-
-    prevOp++;
-    while(prevOp!=prevAfterLastOp) {
-      ASS_NEQ(prevOp->alternative(),firstOp);
-
-      if(prevOp->alternative() || prevOp->isSuccess()) {
-        //there is an operation after the pointingOp that cannot be lost
-        return;
-      }
-      prevOp++;
-    }
-
-    firstOp=prevFirstOp;
-    op=pointingOp;
+  if(removeDeadOp(*firstsInBlocks, 0, removedOp, _root)) {
+    destroySubtrees(_root);
+    _root=nullptr;
+    return;
   }
+  maybeCompact(_root);
 }
+
+
 
 //////////////// retrieval ////////////////////
 

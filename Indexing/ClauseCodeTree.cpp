@@ -37,13 +37,6 @@ using namespace std;
 using namespace Lib;
 using namespace Kernel;
 
-void ClauseCodeTree::onCodeOpDestroying(CodeOp* op)
-{
-  if (op->isLitEnd()) {
-    delete op->getILS(); 
-  }
-}
-
 void ClauseCodeTree::printSuccess(std::ostream& out, const CodeOp& op) const
 {
   out << op.getSuccessResult<Clause>()->toString();
@@ -169,7 +162,6 @@ void ClauseCodeTree::optimizeLiteralOrder(DArray<Literal*>& lits)
       //we haven't matched the whole literal, so we won't proceed with the next one
       break;
     }
-    ASS(nextOp);
     entry=nextOp;
   }
   for (auto& literal : codes) {
@@ -194,6 +186,9 @@ void ClauseCodeTree::evalSharing(CodeStack& code, CodeOp* startOp, size_t& share
  * the @b lastAttemptedOp is equal to the last operation in the @b code stack, otherwise
  * it is the first operation on which mismatch occurred and there was no alternative to
  * proceed to (in this case it therefore holds that @b lastAttemptedOp->alternative==0 ).
+ *
+ * The @b code must contain a single literal. If it was matched completely, @b nextOp is
+ * the entry point of the subtree following the matched LIT_END (or 0 if there is none).
  */
 void ClauseCodeTree::matchCode(CodeStack& code, CodeOp* startOp, size_t& matchedCnt, CodeOp*& nextOp)
 {
@@ -204,9 +199,9 @@ void ClauseCodeTree::matchCode(CodeStack& code, CodeOp* startOp, size_t& matched
     for(;;) {
       if(treeOp->isSearchStruct()) {
 	SearchStruct* ss=treeOp->getSearchStruct();
-	CodeOp** toPtr;
+	int32_t* toPtr;
 	if(ss->getTargetOpPtr<false>(code[i], toPtr) && *toPtr) {
-	  treeOp=*toPtr;
+	  treeOp+=*toPtr;
 	  continue;
 	}
       }
@@ -222,18 +217,20 @@ void ClauseCodeTree::matchCode(CodeStack& code, CodeOp* startOp, size_t& matched
       }
     }
 
-    //the SEARCH_STRUCT operation does not occur in a CodeBlock
     ASS(!treeOp->isSearchStruct());
+    if(treeOp->isLitEnd()) {
+      ASS_EQ(i,clen-1);
+      break;
+    }
     //we can safely do increase because as long as we match and something
-    //remains in the @b code stack, we aren't at the end of the CodeBlock
-    //either (as each code block contains at least one FAIL or SUCCESS
-    //operation, and CodeStack contains at most one SUCCESS as the last
-    //operation)
+    //remains in the @b code stack, we aren't at the end of the code block
+    ASS(!treeOp->isTerminal());
     treeOp++;
   }
   //we matched the whole CodeStack
+  ASS(treeOp->isLitEnd());
   matchedCnt=clen;
-  nextOp=treeOp;
+  nextOp=treeOp->literalContinuation();
 }
 
 
@@ -264,9 +261,24 @@ void ClauseCodeTree::remove(Clause* cl)
   }
   incTimeStamp();
 
+  /**
+   * For each literal level, the pointer referring to the subtree of the level,
+   * the position of the subtree root on the firstsInBlocks stack, and the LIT_END
+   * matched on the previous level (null for the first level).
+   */
+  struct Level {
+    CodeTreeSubtree** ref;
+    size_t fibStart;
+    CodeOp* parentLitEnd;
+  };
+  static Stack<Level> levels;
+  levels.reset();
+
   CodeOp* op=getEntryPoint();
   firstsInBlocks->push(op);
+  levels.push(Level{ &_root, 0, nullptr });
   unsigned depth=0;
+  CodeOp* successOp=nullptr;
   for(;;) {
     RemovingLiteralMatcher* rlm = 0;
     {
@@ -283,6 +295,7 @@ void ClauseCodeTree::remove(Clause* cl)
         INVALID_OPERATION("clause to be removed was not found");
       }
       rlms->pop();
+      levels.pop();
       depth--;
       rlm = &*rlms->top();
       goto iteration_restart;
@@ -298,20 +311,50 @@ void ClauseCodeTree::remove(Clause* cl)
     }
     op->getILS()->timestamp=_curTimeStamp;
 
-    op++;
+    CodeTreeSubtree*& next=op->getILS()->next;
     if(depth==clen-1) {
-      if(removeOneOfAlternatives(op, cl, &*firstsInBlocks)) {
-        //successfully removed
-        break;
+      size_t checkpoint = firstsInBlocks->size();
+      for (CodeOp* s=op->literalContinuation(); s; s=s->alternative()) {
+        if (next) { firstsInBlocks->push(s); }
+        if (s->isSuccess() && s->getSuccessResult<Clause>()==cl) {
+          if (next) {
+            levels.push(Level{ &next, checkpoint, op });
+            successOp=s;
+          } else {
+            s->makeFail();
+            (*levels.top().ref)->_garbage++;
+            successOp=op;
+          }
+          break;
+        }
       }
+      if (successOp) { break; }
+      firstsInBlocks->truncate(checkpoint);
       goto iteration_restart;
     }
-    ASS_L(depth,clen-1);
+    if(!next) { goto iteration_restart; }
+    levels.push(Level{ &next, firstsInBlocks->size(), op });
+    op=next->root();
+    firstsInBlocks->push(op);
     depth++;
   }
 
   for(unsigned i=0;i<clen;i++) {
     lInfos[i].dispose();
+  }
+
+  // Free empty subtrees from the leaf upwards. Only the first surviving
+  // subtree has dead slots to compact. All higher levels are untouched.
+  while (levels.isNonEmpty()) {
+    Level lev=levels.pop();
+    if (!removeDeadOp(*firstsInBlocks, lev.fibStart, successOp, *lev.ref)) {
+      maybeCompact(*lev.ref);
+      break;
+    }
+    destroySubtrees(*lev.ref);
+    *lev.ref=nullptr;
+    firstsInBlocks->truncate(lev.fibStart);
+    successOp=lev.parentLitEnd;
   }
 }
 
@@ -595,7 +638,7 @@ void ClauseCodeTree::ClauseMatcher::reset()
 /**
  * Return next clause matching query or 0 if there is not such
  */
-Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
+__attribute__((noinline)) Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
 {
   if(lms.isEmpty()) {
     return 0;
@@ -626,9 +669,7 @@ Clause* ClauseCodeTree::ClauseMatcher::next(int& resolvedQueryLit)
       ASS(lm->op->isLitEnd());
       ASS_LE(lms.size(), query->length()); //this is due to the seekOnlySuccess part below
 
-      //LIT_END is never the last operation in the CodeBlock,
-      //so we can increase here
-      CodeOp* newLitEntry=lm->op+1;
+      CodeOp* newLitEntry=lm->op->literalContinuation();
 
       //check that we have cleared the sresLiteral value if it is no longer valid
       ASS(!sres || sresLiteral==sresNoLiteral || sresLiteral<lms.size()-1);
